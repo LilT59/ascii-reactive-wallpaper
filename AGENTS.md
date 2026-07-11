@@ -42,9 +42,11 @@ Standard KDE Plasma wallpaper manifest. `KPackageStructure: "Plasma/Wallpaper"`.
 ### contents/config/main.xml
 KConfigXT definition for user-configurable settings:
 - **Mode** — Animation type (0=starfield, 1=matrix, etc.)
-- **Detail** — ASCII resolution (low/medium/high = char size 4/8/16px)
+- **CharacterSize** — Numeric character height in pixels (8-48)
+- **ColorDepth** — Adaptive media palette size (4-64)
 - **Color** — Primary color / palette
 - **Speed** — Animation speed multiplier
+- **FrameRate** — Maximum animation rate (5-60 FPS)
 
 These are exposed as `wallpaper.configuration.*` properties in QML.
 
@@ -58,9 +60,10 @@ is capped at 30 FPS, and static images do not rebuild merely because the clock a
 
 ### contents/ui/main.qml
 Root component extending `WallpaperItem`:
-- Creates the `AsciiShader` child
-- Runs a `Timer` at configurable FPS (~30fps) that advances the animation time
-- Handles configuration changes (mode, detail, color)
+- Creates one native `AsciiRenderer` child
+- Runs a configurable timer that advances procedural animation time
+- Maps global pointer coordinates from `PointerTracker` into wallpaper-local coordinates
+- Displays media decoding errors without blocking the renderer
 - Cleans up on destruction
 
 ### native/asciirenderer.cpp
@@ -72,17 +75,9 @@ textured quads in batches below backend vertex limits. Never add one QML item pe
 An in-process singleton that polls the global cursor and observes mouse presses through
 a `plasmashell` application event filter. QML maps global coordinates to each wallpaper.
 
-### contents/shaders/ascii.vert
-Standard pass-through vertex shader. Only receives `qt_Matrix` and `qt_Opacity` in the std140 `buf` block.
-
-### contents/shaders/ascii.frag
-The procedural animation engine. Standalone uniforms (mapped from QML properties by name):
-- `iTime` — animation time in seconds (float)
-- `iResolution` — viewport size (vec2)
-- `iCharSize` — character cell size `(charWidth, charHeight)` (vec2)
-- `iNumChars` — number of characters in atlas (float)
-- `iMode` — animation mode selector (float, 0=starfield, 1=matrix)
-- `uAtlas` — character atlas texture (sampler2D, binding=1)
+### contents/shaders
+Historical ShaderEffect experiments. They are retained as references but are not loaded
+by the active wallpaper. Runtime rendering is implemented by `native/asciirenderer.cpp`.
 
 #### Modes
 
@@ -94,9 +89,10 @@ The procedural animation engine. Standalone uniforms (mapped from QML properties
 - Hash-based seeding means stars are deterministic per position but pseudo-random
 
 **Mode 1 — Matrix Rain**
-- Each column is an independent "rain drop" with pseudo-random speed and offset
-- Lead character is bright, trail fades out
-- Characters cycle (though we approximate by brightness mapping)
+- Each column has an independent falling head with pseudo-random speed and offset
+- Heads deposit characters into persistent per-cell state
+- Deposited characters remain stationary, independently cycle, fade by age, and clear
+- Brightness selects multiple green atlas rows while glyph identity is independent
 - Color: classic matrix green on black
 
 **Implemented additional modes**:
@@ -106,29 +102,19 @@ The procedural animation engine. Standalone uniforms (mapped from QML properties
 - Audio-reactive — needs pipewire/pulse audio hook via D-Bus → shader uniform
 - System-reactive — CPU/mem/network via KDE system monitor daemon → shader uniform
 
-#### Shader Pipeline (per-fragment)
+#### Scene-Graph Pipeline
 ```
-fragCoord = uv * iResolution
-cell = floor(fragCoord / iCharSize)
-offset = fract(fragCoord / iCharSize)
-brightness = proceduralFunction(cell, iTime, iMode, ...)
-charIdx = floor(brightness * (iNumChars - 1))
-atlasU = (charIdx + offset.x) / iNumChars
-atlasV = offset.y
-charTexel = texture(uAtlas, vec2(atlasU, atlasV))
-finalColor = mix(bgColor, fgColor, charTexel.r)
+source frame/procedural state -> displaced cell sample
+brightness -> character index
+source color -> cached adaptive palette index
+character + palette row -> atlas UV
+visible cells -> textured quads in <=10,000-glyph batches
 ```
 
-## Shader Compilation
+## Native Compilation
 
-Shaders are written as GLSL source files and compiled to SPIR-V `.qsb` format using `qsb` (Qt Shader Baker):
-
-```bash
-/usr/lib/qt6/bin/qsb ascii.vert -o ascii.vert.qsb
-/usr/lib/qt6/bin/qsb ascii.frag -o ascii.frag.qsb
-```
-
-The `.qsb` files are shipped with the plugin. Source GLSL is also included for maintainability.
+Run `./build-native.sh` to build `contents/ui/native/libasciireactivepointerplugin.so`.
+The generated library is architecture- and Qt-ABI-specific and is excluded from Git.
 
 ## Configuration Flow
 
@@ -143,14 +129,13 @@ The `.qsb` files are shipped with the plugin. Source GLSL is also included for m
 
 ```bash
 # Install locally for testing
-ln -sf $PWD ~/.local/share/plasma/wallpapers/ascii-reactive-wallpaper
+./install.sh
 
 # Uninstall
-rm ~/.local/share/plasma/wallpapers/ascii-reactive-wallpaper
+./uninstall.sh
 
-# Rebuild shaders after editing
-/usr/lib/qt6/bin/qsb contents/shaders/ascii.vert -o contents/shaders/ascii.vert.qsb
-/usr/lib/qt6/bin/qsb contents/shaders/ascii.frag -o contents/shaders/ascii.frag.qsb
+# Rebuild the native QML module
+./build-native.sh
 
 # Check for Qt Quick errors (after switching wallpaper)
 journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
@@ -158,12 +143,14 @@ journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
 
 ## Pitfalls / Known Issues
 
-- **ShaderEffect in Qt 6 uses `.qsb` compiled shaders only** — no inline GLSL strings. Every shader change needs recompilation with `qsb`.
-- **Uniforms must be declared outside the `buf` block** in the fragment shader. The `buf` block (binding=0) only contains `qt_Matrix` and `qt_Opacity`. Qt 6 ShaderEffect maps QML properties to standalone uniforms by name.
-- **Canvas atlas dimensions depend on `charWidth * 2` per slot**, not `charWidth`. This gives enough room for wide characters like `@` and `W` in monospace fonts.
-- **Timer vs vblank** — QML Timer is not synced to display vsync. For smooth animation we use ~30fps (33ms). Going above 60fps is wasteful for ASCII art.
-- **The first character in `asciiChars` should be a space** — this ensures brightness=0 maps to an invisible character (background only).
-- **std140 layout** — when adding new uniforms to the shader, remember float→vec2 has 8-byte alignment. Use padding fields if needed.
+- **Native ABI** — rebuild after Qt upgrades and for every target architecture.
+- **Geometry limits** — keep batches below 60,000 vertices; the current limit is 10,000 glyphs (60,000 vertices).
+- **Atlas ownership** — textures are created on the scene-graph synchronization path and owned by the render root.
+- **First ramp character** — keep it as a space so zero brightness emits no geometry.
+- **Static media** — never rebuild static image geometry because procedural time advanced.
+- **Adaptive colors** — cache per-cell palette indices; do not run nearest-color searches during ripple steps.
+- **Media FPS** — throttle decoded frames to the configured rate; cap displacement physics at 30 FPS.
+- **Plasma reloads** — switch wallpaper types to reload; routine `plasmashell` restarts have crashed on this setup.
 
 ## Quality Checklist
 
@@ -201,7 +188,7 @@ Sample displaced source
 Brightness -> ASCII character
         |
         v
-Render text rows
+Render bounded glyph batches
 ```
 
 Supported sources:
@@ -279,11 +266,11 @@ sampleY = cellY - displacementY
 Pause simulation updates once total displacement energy falls below a small
 threshold. Recompute only affected rows where practical.
 
-## Planned Configuration
+## Configuration
 
 - Source type: procedural or image
 - Procedural mode
-- Image file URL
+- Media file URL and stretch/fit/crop mode
 - Reactive enabled
 - Pointer movement enabled
 - Click ripple enabled
@@ -293,29 +280,26 @@ threshold. Recompute only affected rows where practical.
 - Character ramp
 - Monochrome or source color
 - Animation speed
-- Grid detail
+- Numeric character size and adaptive color depth
 - Maximum update rate
+- Optional source colors and optional custom procedural color
+- Reset-to-defaults action
 
 ## Performance Rules
 
-- Keep the text-row compatibility renderer around 10-15 FPS.
 - Preserve one native renderer item; never create one QML item per character or row.
 - Downsample source images only when their input or grid dimensions change.
 - Do not sample full-resolution images on every animation frame.
 - Use a scalar displacement field before considering separate X/Y fields.
 - Pause inactive simulations and stop updates while the wallpaper is hidden.
-- Profile before adding source-colored text or video.
+- Cache adaptive palette assignments outside displacement updates.
+- Do not regenerate static media on procedural timer ticks.
 - Keep geometry batches below 60,000 vertices for graphics-backend compatibility.
 - Rebuild the native module with `./build-native.sh` after Qt ABI upgrades.
 
-## Reactive Feature Roadmap
+## Remaining Work
 
-1. Add reactive configuration toggles and pointer tracking.
-2. Verify hover and click events reach the wallpaper on Plasma.
-3. Implement click ripples with a scalar displacement grid.
-4. Apply displacement to procedural source sampling.
-5. Add static monochrome image-to-ASCII conversion.
-6. Add movement-driven directional displacement.
-7. Profile CPU, memory, and frame pacing on integrated graphics.
-8. Decide whether simulation or image sampling needs a native helper.
-9. Add source-colored ASCII only after the monochrome path is stable.
+1. Profile CPU, memory, and frame pacing across character sizes, color depths, and media FPS.
+2. Verify behavior across multiple monitors, Plasma lock/unlock, hidden wallpapers, and Qt upgrades.
+3. Add screenshots, a demo video, tagged releases, and distribution-specific packages.
+4. Consider audio-reactive and system-monitor sources after profiling the shipped modes.

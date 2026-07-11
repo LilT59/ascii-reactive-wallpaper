@@ -1,5 +1,6 @@
 /build/
 /contents/ui/native/*.so
+/Log.md
 *.o
 *.user
 .cache/
