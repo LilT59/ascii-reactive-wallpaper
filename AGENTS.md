@@ -149,8 +149,11 @@ journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
 - **First ramp character** — keep it as a space so zero brightness emits no geometry.
 - **Static media** — never rebuild static image geometry because procedural time advanced.
 - **Adaptive colors** — cache per-cell palette indices; do not run nearest-color searches during ripple steps.
-- **Media FPS** — throttle decoded frames to the configured rate; cap displacement physics at 30 FPS.
 - **Plasma reloads** — switch wallpaper types to reload; routine `plasmashell` restarts have crashed on this setup.
+- **KConfigXT `Url` type** — `ImagePath` must use `type="String"`, not `type="Url"`. An empty default `Url` crashes systemsettings (SIGABRT) because it tries to construct `QUrl("")`. All built-in KDE wallpapers use `String` for file paths.
+- **QPointF metatype** — `PointerTracker`'s QML singleton registration requires `qRegisterMetaType<QPointF>()` before `qmlRegisterSingletonType` in `registerTypes()`. Without it, the QML engine can't resolve `Q_PROPERTY(QPointF globalPosition ...)` in contexts where QPointF isn't pre-registered.
+- **Null window in updatePaintNode** — guard with `if (!window()) return nullptr;` before accessing `window()->createTextureFromImage()`. systemsettings preview windows may not have a fully initialized scene graph.
+- **Qt Multimedia** — removed from build (was linked but unused after video/GIF stripped). If re-added later, use `QLibrary` runtime loading to avoid pulling the multimedia backend into systemsettings.
 
 ## Quality Checklist
 
@@ -194,12 +197,12 @@ Render bounded glyph batches
 Supported sources:
 
 - Static images with stretch, fit, and crop modes
-- Animated images through `QMovie`
-- Looping video through Qt Multimedia and `QVideoSink`
 - Starfield
 - Matrix rain
 - Plasma/noise
 - Future audio or system-monitor sources
+
+Note: Animated GIF and video playback were removed due to Qt Multimedia linkage causing systemsettings crashes. Static image-to-ASCII conversion via `QImage` still works.
 
 Each logical cell may contain brightness, a quantized foreground color, and scalar
 height/velocity values. Rendering derives X/Y displacement from the height gradient.
@@ -208,8 +211,8 @@ height/velocity values. Rendering derives X/Y displacement from the height gradi
 
 Image rendering should follow these steps:
 
-1. Select a local image or video with the configuration file dialog.
-2. Decode still/animated images with Qt image APIs or video with Qt Multimedia.
+1. Select a local image with the configuration file dialog.
+2. Decode still images with Qt image APIs.
 3. Downsample each new source frame to the current character-grid resolution.
 4. Calculate luminance with `0.2126R + 0.7152G + 0.0722B`.
 5. Map luminance to a configurable character ramp such as ` .:-=+*#%@`.
@@ -301,5 +304,5 @@ threshold. Recompute only affected rows where practical.
 
 1. Profile CPU, memory, and frame pacing across character sizes, color depths, and media FPS.
 2. Verify behavior across multiple monitors, Plasma lock/unlock, hidden wallpapers, and Qt upgrades.
-3. Add screenshots, a demo video, tagged releases, and distribution-specific packages.
+3. Add screenshots, a demo, tagged releases, and distribution-specific packages.
 4. Consider audio-reactive and system-monitor sources after profiling the shipped modes.

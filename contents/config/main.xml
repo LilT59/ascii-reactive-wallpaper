@@ -8,10 +8,6 @@
             <label>Animation mode</label>
             <default>0</default>
         </entry>
-        <entry name="Detail" type="Int">
-            <label>Character size</label>
-            <default>1</default>
-        </entry>
         <entry name="CharacterSize" type="Int">
             <label>Character height in pixels</label>
             <default>19</default>
@@ -41,11 +37,11 @@
             <default>#7fdbff</default>
         </entry>
         <entry name="SourceType" type="Int">
-            <label>Source type</label>
+            <label>Source type (0=procedural, 1=image)</label>
             <default>0</default>
         </entry>
-        <entry name="ImagePath" type="Url">
-            <label>Image file</label>
+        <entry name="ImagePath" type="String">
+            <label>Image file path</label>
             <default></default>
         </entry>
         <entry name="ImageFit" type="Int">

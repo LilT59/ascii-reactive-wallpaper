@@ -12,7 +12,6 @@ Kirigami.FormLayout {
     property var configDialog
     property var wallpaperConfiguration
     property alias cfg_Mode: modeBox.currentIndex
-    property int cfg_Detail: 1
     property alias cfg_CharacterSize: sizeSpin.value
     property alias cfg_ColorDepth: depthSpin.value
     property alias cfg_Speed: speedSlider.value
@@ -20,10 +19,10 @@ Kirigami.FormLayout {
     property alias cfg_Color: colorButton.color
     property alias cfg_SourceType: sourceBox.currentIndex
     property alias cfg_ImagePath: imagePath.text
-    property alias cfg_CharacterRamp: rampField.text
     property alias cfg_ImageFit: fitBox.currentIndex
     property alias cfg_SourceColor: sourceColorCheck.checked
     property alias cfg_CustomAnimationColor: customAnimationColorCheck.checked
+    property alias cfg_CharacterRamp: rampField.text
     property alias cfg_ReactiveEnabled: reactiveCheck.checked
     property alias cfg_PointerMovement: movementCheck.checked
     property alias cfg_ClickRipple: clickCheck.checked
@@ -95,26 +94,26 @@ Kirigami.FormLayout {
     QQC2.ComboBox {
         id: sourceBox
         Kirigami.FormData.label: i18n("Source:")
-        model: [i18n("Procedural"), i18n("Image or video")]
+        model: [i18n("Procedural"), i18n("Image")]
     }
 
     QQC2.TextField {
         id: imagePath
-        Kirigami.FormData.label: i18n("Image URL:")
+        Kirigami.FormData.label: i18n("Image file:")
         enabled: sourceBox.currentIndex === 1
-        placeholderText: i18n("file:///home/user/Pictures/image.png")
+        placeholderText: i18n("/home/user/Pictures/image.png")
     }
 
     QQC2.Button {
         text: i18n("Browse...")
         enabled: sourceBox.currentIndex === 1
-        onClicked: mediaDialog.open()
+        onClicked: imageDialog.open()
     }
 
     FileDialog {
-        id: mediaDialog
-        title: i18n("Select image or video")
-        nameFilters: [i18n("Media files (*.png *.jpg *.jpeg *.webp *.gif *.apng *.mp4 *.webm *.mkv *.mov)"), i18n("All files (*)")]
+        id: imageDialog
+        title: i18n("Select image")
+        nameFilters: [i18n("Images (*.png *.jpg *.jpeg *.webp *.bmp)"), i18n("All files (*)")]
         onAccepted: imagePath.text = selectedFile
     }
 
@@ -133,7 +132,7 @@ Kirigami.FormLayout {
 
     QQC2.Label {
         visible: sourceBox.currentIndex === 1 && imagePath.text.length === 0
-        text: i18n("Select a readable local image, animation, or video file.")
+        text: i18n("Select a readable local image file.")
         color: Kirigami.Theme.negativeTextColor
         wrapMode: Text.Wrap
     }

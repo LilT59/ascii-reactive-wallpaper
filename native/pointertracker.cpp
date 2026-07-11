@@ -35,7 +35,9 @@ bool PointerTracker::eventFilter(QObject *watched, QEvent *event)
     Q_UNUSED(watched)
     if (event->type() == QEvent::MouseButtonPress) {
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        emit pressed(mouseEvent->globalPosition(), static_cast<int>(mouseEvent->button()));
+        emit pressed(mouseEvent->globalPosition().x(),
+                     mouseEvent->globalPosition().y(),
+                     static_cast<int>(mouseEvent->button()));
     }
     return false;
 }

@@ -58,7 +58,7 @@ WallpaperItem {
         target: Native.PointerTracker
 
         function onGlobalPositionChanged() {
-            if (!renderer.reactiveEnabled)
+            if (!renderer || !renderer.reactiveEnabled)
                 return;
             const local = root.mapFromGlobal(Native.PointerTracker.globalPosition);
             if (local.x >= 0 && local.y >= 0 && local.x < root.width && local.y < root.height)
@@ -67,10 +67,10 @@ WallpaperItem {
                 renderer.resetPointer();
         }
 
-        function onPressed(globalPosition, button) {
-            if (!renderer.reactiveEnabled)
+        function onPressed(x, y, button) {
+            if (!renderer || !renderer.reactiveEnabled)
                 return;
-            const local = root.mapFromGlobal(globalPosition);
+            const local = root.mapFromGlobal(x, y);
             if (local.x >= 0 && local.y >= 0 && local.x < root.width && local.y < root.height)
                 renderer.clickPointer(local.x, local.y);
         }

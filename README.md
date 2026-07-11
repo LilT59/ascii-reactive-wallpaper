@@ -5,7 +5,7 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 ## Features
 
 - Starfield, Matrix rain, plasma, fire, aurora, and nebula modes
-- Static images, animated images, and looping video converted to ASCII
+- Static images and procedural animations converted to ASCII
 - Adaptive source-color palettes with configurable color depth
 - Pointer displacement and click ripples
 - Configurable character ramp, size, speed, color, and frame rate
@@ -16,12 +16,12 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 - KDE Plasma 6
 - CMake 3.21 or newer
 - C++17 compiler
-- Qt 6 Core, Gui, QML, Quick, and Multimedia development files
+- Qt 6 Core, Gui, QML, and Quick development files
 
 Ubuntu/Debian:
 
 ```bash
-sudo apt install build-essential cmake qt6-base-dev qt6-declarative-dev qt6-multimedia-dev
+sudo apt install build-essential cmake qt6-base-dev qt6-declarative-dev
 ```
 
 ## Install
@@ -73,7 +73,6 @@ Inspect Plasma logs:
 journalctl --user -u plasma-plasmashell.service -f -o cat
 ```
 
-Video support depends on codecs available to Qt Multimedia on the host system. Global pointer behavior also depends on the Plasma/Wayland environment.
 
 ## Packaging
 

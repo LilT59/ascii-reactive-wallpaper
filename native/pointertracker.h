@@ -15,7 +15,7 @@ public:
 
 signals:
     void globalPositionChanged();
-    void pressed(QPointF globalPosition, int button);
+    void pressed(qreal x, qreal y, int button);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

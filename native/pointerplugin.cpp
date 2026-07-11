@@ -3,6 +3,7 @@
 
 #include <QQmlExtensionPlugin>
 #include <qqml.h>
+#include <QPointF>
 
 class AsciiReactivePointerPlugin : public QQmlExtensionPlugin
 {
@@ -12,6 +13,7 @@ class AsciiReactivePointerPlugin : public QQmlExtensionPlugin
 public:
     void registerTypes(const char *uri) override
     {
+        qRegisterMetaType<QPointF>();
         qmlRegisterSingletonType<PointerTracker>(uri, 1, 0, "PointerTracker",
             [](QQmlEngine *, QJSEngine *) -> QObject * {
                 return new PointerTracker;

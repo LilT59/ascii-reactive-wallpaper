@@ -3,10 +3,6 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QPainter>
-#include <QMediaPlayer>
-#include <QMovie>
-#include <QVideoFrame>
-#include <QVideoSink>
 #include <QFileInfo>
 #include <QQuickWindow>
 #include <QDebug>
@@ -46,16 +42,6 @@ AsciiRenderer::AsciiRenderer(QQuickItem *parent) : QQuickItem(parent)
     m_simulationTimer.setInterval(33);
     connect(&m_simulationTimer, &QTimer::timeout, this, &AsciiRenderer::stepSimulation);
     m_palette = {m_color, QColor("#ff5555"), QColor("#ffb86c"), QColor("#f1fa8c"), QColor("#50fa7b"), QColor("#8be9fd"), QColor("#bd93f9"), QColor("#ff79c6"), QColor("#0b3d1b"), QColor("#147a35"), QColor("#27c95a"), QColor("#b8ffd0")};
-    m_movie = new QMovie(this);
-    connect(m_movie, &QMovie::frameChanged, this, [this] { processImage(m_movie->currentImage()); });
-    m_videoSink = new QVideoSink(this);
-    connect(m_videoSink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
-        if (frame.isValid()) processImage(frame.toImage());
-    });
-    m_player = new QMediaPlayer(this);
-    m_player->setVideoSink(m_videoSink);
-    m_player->setLoops(QMediaPlayer::Infinite);
-    connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &error) { setSourceError(error); });
 }
 
 void AsciiRenderer::setTime(qreal value)
@@ -133,8 +119,6 @@ void AsciiRenderer::rebuildGrid()
 
 void AsciiRenderer::rebuildImage()
 {
-    m_movie->stop();
-    m_player->stop();
     m_animatedSource = false;
     m_mediaFrame = 0;
     m_imageBrightness.clear();
@@ -149,19 +133,12 @@ void AsciiRenderer::rebuildImage()
     const QString path = m_imageSource.isLocalFile() ? m_imageSource.toLocalFile() : m_imageSource.toString();
     if (!QFileInfo::exists(path)) { setSourceError(tr("File does not exist: %1").arg(path)); return; }
     const QString suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == "mp4" || suffix == "webm" || suffix == "mkv" || suffix == "mov" || suffix == "avi") {
-        m_animatedSource = true;
-        setSourceError({});
-        m_player->setSource(QUrl::fromLocalFile(path));
-        m_player->play();
+    if (suffix == "mp4" || suffix == "webm" || suffix == "mkv" || suffix == "mov" || suffix == "avi" || suffix == "gif") {
+        setSourceError(tr("Media playback not supported in this build."));
         return;
     }
-    m_movie->setFileName(path);
-    if (m_movie->isValid() && m_movie->frameCount() != 1) {
-        m_animatedSource = true;
-        setSourceError({});
-        m_movie->start();
-        return;
+    // Static image loading
+    {
     }
     QImage image(path);
     if (image.isNull()) {
@@ -176,12 +153,7 @@ void AsciiRenderer::rebuildImage()
 void AsciiRenderer::processImage(const QImage &input)
 {
     if (input.isNull() || m_columns <= 0) return;
-    if (m_animatedSource) {
-        const int minimumFrameTime = qRound(1000.0 / m_frameRate);
-        if (m_mediaThrottle.isValid() && m_mediaThrottle.elapsed() < minimumFrameTime)
-            return;
-        m_mediaThrottle.restart();
-    }
+
     QImage image = input;
     const auto aspect = m_imageFit == 0 ? Qt::IgnoreAspectRatio : (m_imageFit == 1 ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding);
     image = image.scaled(m_columns, m_rows, aspect, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
@@ -407,6 +379,11 @@ void AsciiRenderer::stepSimulation()
 
 QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
+    // Guard against null window (systemsettings preview, teardown, etc.)
+    if (!window()) {
+        delete oldNode;
+        return nullptr;
+    }
     auto *rootNode = static_cast<RenderRoot *>(oldNode);
     if (!rootNode) rootNode = new RenderRoot;
     if (m_atlasDirty || !rootNode->texture) {

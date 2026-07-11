@@ -1,16 +1,12 @@
 #pragma once
 
 #include <QColor>
-#include <QElapsedTimer>
 #include <QImage>
 #include <QQuickItem>
 #include <QTimer>
 #include <QUrl>
 #include <vector>
 
-class QMediaPlayer;
-class QMovie;
-class QVideoSink;
 
 class AsciiRenderer : public QQuickItem
 {
@@ -153,11 +149,7 @@ private:
     qreal m_lastMatrixTime = 0;
     QVector<QColor> m_palette;
     QString m_sourceError;
-    QMovie *m_movie = nullptr;
-    QMediaPlayer *m_player = nullptr;
-    QVideoSink *m_videoSink = nullptr;
     int m_mediaFrame = 0;
     bool m_animatedSource = false;
-    QElapsedTimer m_mediaThrottle;
     QTimer m_simulationTimer;
 };
