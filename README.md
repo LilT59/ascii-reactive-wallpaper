@@ -2,7 +2,7 @@
 
 A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art with a native Qt Quick scene-graph renderer.
 
-![Demo](demo.gif)
+![Demo](https://github.com/LilT59/ascii-reactive-wallpaper/releases/download/v1.0.0/demo.gif)
 
 ## Features
 

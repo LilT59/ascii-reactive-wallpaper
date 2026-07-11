@@ -2,6 +2,7 @@
 /build/
 .cache/
 /contents/ui/native/*.so
+/demo.gif
 .idea/
 /Log.md
 *.o
