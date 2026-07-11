@@ -157,15 +157,15 @@ journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
 
 ## Quality Checklist
 
-- [ ] Plugin shows up in Wallpaper Type dropdown after install
-- [ ] Starfield mode renders animated twinkling stars as ASCII characters
-- [ ] Matrix rain mode renders falling character columns
-- [ ] Mode switching works without visual artifacts
-- [ ] Detail setting correctly changes character resolution
-- [ ] Atlas regenerates when detail changes
+- [x] Plugin shows up in Wallpaper Type dropdown after install
+- [x] Starfield mode renders animated twinkling stars as ASCII characters
+- [x] Matrix rain mode renders falling character columns
+- [x] Mode switching works without visual artifacts
+- [x] Detail setting correctly changes character resolution
+- [x] Atlas regenerates when detail changes
 - [ ] No QML warnings in journalctl
-- [ ] No performance stutter (stable ~30fps on integrated GPU)
-- [ ] Clean uninstall removes all plugin files
+- [x] No performance stutter (stable ~30fps on integrated GPU)
+- [x] Clean uninstall removes all plugin files
 
 ## Current Rendering Status
 
