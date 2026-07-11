@@ -1,0 +1,464 @@
+#include "asciirenderer.h"
+
+#include <QFont>
+#include <QFontMetrics>
+#include <QPainter>
+#include <QMediaPlayer>
+#include <QMovie>
+#include <QVideoFrame>
+#include <QVideoSink>
+#include <QFileInfo>
+#include <QQuickWindow>
+#include <QDebug>
+#include <QSGGeometryNode>
+#include <QSGRendererInterface>
+#include <QSGTextureMaterial>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace {
+struct BatchNode : QSGGeometryNode {
+    QSGGeometry geometry{QSGGeometry::defaultAttributes_TexturedPoint2D(), 0};
+    QSGTextureMaterial material;
+
+    explicit BatchNode(QSGTexture *texture)
+    {
+        geometry.setDrawingMode(QSGGeometry::DrawTriangles);
+        geometry.setVertexDataPattern(QSGGeometry::DynamicPattern);
+        setGeometry(&geometry);
+        setMaterial(&material);
+        material.setFlag(QSGMaterial::Blending);
+        material.setTexture(texture);
+        material.setFiltering(QSGTexture::Linear);
+    }
+};
+
+struct RenderRoot : QSGNode {
+    QSGTexture *texture = nullptr;
+    ~RenderRoot() override { delete texture; }
+};
+}
+
+AsciiRenderer::AsciiRenderer(QQuickItem *parent) : QQuickItem(parent)
+{
+    setFlag(ItemHasContents, true);
+    m_simulationTimer.setInterval(33);
+    connect(&m_simulationTimer, &QTimer::timeout, this, &AsciiRenderer::stepSimulation);
+    m_palette = {m_color, QColor("#ff5555"), QColor("#ffb86c"), QColor("#f1fa8c"), QColor("#50fa7b"), QColor("#8be9fd"), QColor("#bd93f9"), QColor("#ff79c6"), QColor("#0b3d1b"), QColor("#147a35"), QColor("#27c95a"), QColor("#b8ffd0")};
+    m_movie = new QMovie(this);
+    connect(m_movie, &QMovie::frameChanged, this, [this] { processImage(m_movie->currentImage()); });
+    m_videoSink = new QVideoSink(this);
+    connect(m_videoSink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
+        if (frame.isValid()) processImage(frame.toImage());
+    });
+    m_player = new QMediaPlayer(this);
+    m_player->setVideoSink(m_videoSink);
+    m_player->setLoops(QMediaPlayer::Infinite);
+    connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &error) { setSourceError(error); });
+}
+
+void AsciiRenderer::setTime(qreal value)
+{
+    if (m_time == value) return;
+    const qreal delta = std::clamp(value - m_time, 0.0, 0.25);
+    m_time = value;
+    emit timeChanged();
+    // Static and decoded media frames update themselves; the QML clock is only
+    // a source of procedural animation and must not rebuild static geometry.
+    if (m_sourceType == 0 && m_mode == 1)
+        updateMatrix(delta);
+    if (m_sourceType == 0)
+        regenerateCharacters();
+}
+void AsciiRenderer::setMode(int value) { if (m_mode == value) return; m_mode = value; if (m_mode == 1) { std::fill(m_matrixBrightness.begin(), m_matrixBrightness.end(), 0); m_lastMatrixTime = m_time; } emit modeChanged(); regenerateCharacters(); }
+void AsciiRenderer::setPrimaryColor(const QColor &value) { if (m_color == value) return; m_color = value; if (m_sourceType == 0 || !m_sourceColor) m_palette[0] = value; m_atlasDirty = true; emit primaryColorChanged(); update(); }
+void AsciiRenderer::setSourceType(int value) { if (m_sourceType == value) return; m_sourceType = value; emit sourceTypeChanged(); rebuildImage(); regenerateCharacters(); }
+void AsciiRenderer::setImageSource(const QUrl &value) { if (m_imageSource == value) return; m_imageSource = value; emit imageSourceChanged(); rebuildImage(); regenerateCharacters(); }
+void AsciiRenderer::setCharacterRamp(const QString &value) { const QString ramp = value.size() > 1 ? value : QStringLiteral(" .:-=+*#%@"); if (m_ramp == ramp) return; m_ramp = ramp; m_atlasDirty = true; emit characterRampChanged(); regenerateCharacters(); }
+void AsciiRenderer::setImageFit(int value) { value = std::clamp(value, 0, 2); if (m_imageFit == value) return; m_imageFit = value; emit imageFitChanged(); rebuildImage(); }
+void AsciiRenderer::setSourceColor(bool value) { if (m_sourceColor == value) return; m_sourceColor = value; if (value && m_sourceType == 1) updateAdaptivePalette(m_animatedSource); emit sourceColorChanged(); regenerateCharacters(); }
+void AsciiRenderer::setCustomAnimationColor(bool value) { if (m_customAnimationColor == value) return; m_customAnimationColor = value; emit customAnimationColorChanged(); regenerateCharacters(); }
+void AsciiRenderer::setColorDepth(int value) { value = std::clamp(value, 4, 64); if (m_colorDepth == value) return; m_colorDepth = value; if (m_sourceColor && m_sourceType == 1) updateAdaptivePalette(m_animatedSource); emit colorDepthChanged(); regenerateCharacters(); }
+void AsciiRenderer::setFrameRate(int value) { value = std::clamp(value, 5, 60); if (m_frameRate == value) return; m_frameRate = value; m_simulationTimer.setInterval(qRound(1000.0 / std::min(value, 30))); emit frameRateChanged(); }
+
+void AsciiRenderer::setCharacterSize(int value)
+{
+    value = std::clamp(value, 8, 48);
+    if (m_charHeight == value) return;
+    m_charHeight = value;
+    m_charWidth = std::max(4, qRound(value * 0.58));
+    m_atlasDirty = true;
+    emit characterSizeChanged();
+    rebuildGrid();
+}
+void AsciiRenderer::setSourceError(const QString &error) { if (m_sourceError == error) return; m_sourceError = error; emit sourceErrorChanged(); }
+
+void AsciiRenderer::setDetail(int value)
+{
+    value = std::clamp(value, 0, 2);
+    if (m_detail == value) return;
+    m_detail = value;
+    const int widths[] = {8, 11, 16};
+    const int heights[] = {14, 19, 28};
+    m_charWidth = widths[value];
+    m_charHeight = heights[value];
+    m_atlasDirty = true;
+    emit detailChanged();
+    rebuildGrid();
+}
+
+void AsciiRenderer::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
+{
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+    rebuildGrid();
+}
+
+void AsciiRenderer::rebuildGrid()
+{
+    m_columns = std::max(1, int(std::ceil(width() / m_charWidth)) + 1);
+    m_rows = std::max(1, int(std::ceil(height() / m_charHeight)) + 1);
+    const size_t size = size_t(m_columns * m_rows);
+    m_heights.assign(size, 0);
+    m_velocities.assign(size, 0);
+    m_characters.assign(size, 0);
+    m_colorIndices.assign(size, 0);
+    m_matrixBrightness.assign(size, 0);
+    m_matrixCharacters.assign(size, 1);
+    m_simulationActive = false;
+    m_simulationTimer.stop();
+    rebuildImage();
+    regenerateCharacters();
+}
+
+void AsciiRenderer::rebuildImage()
+{
+    m_movie->stop();
+    m_player->stop();
+    m_animatedSource = false;
+    m_mediaFrame = 0;
+    m_imageBrightness.clear();
+    m_imageColors.clear();
+    m_imageColorIndices.clear();
+    if (m_sourceType != 1) {
+        m_palette = {m_color, QColor("#ff5555"), QColor("#ffb86c"), QColor("#f1fa8c"), QColor("#50fa7b"), QColor("#8be9fd"), QColor("#bd93f9"), QColor("#ff79c6"), QColor("#0b3d1b"), QColor("#147a35"), QColor("#27c95a"), QColor("#b8ffd0")};
+        m_atlasDirty = true;
+        return;
+    }
+    if (m_columns <= 0) return;
+    const QString path = m_imageSource.isLocalFile() ? m_imageSource.toLocalFile() : m_imageSource.toString();
+    if (!QFileInfo::exists(path)) { setSourceError(tr("File does not exist: %1").arg(path)); return; }
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == "mp4" || suffix == "webm" || suffix == "mkv" || suffix == "mov" || suffix == "avi") {
+        m_animatedSource = true;
+        setSourceError({});
+        m_player->setSource(QUrl::fromLocalFile(path));
+        m_player->play();
+        return;
+    }
+    m_movie->setFileName(path);
+    if (m_movie->isValid() && m_movie->frameCount() != 1) {
+        m_animatedSource = true;
+        setSourceError({});
+        m_movie->start();
+        return;
+    }
+    QImage image(path);
+    if (image.isNull()) {
+        qWarning() << "ASCII renderer could not load image" << path;
+        setSourceError(tr("Could not decode: %1").arg(path));
+        return;
+    }
+    setSourceError({});
+    processImage(image);
+}
+
+void AsciiRenderer::processImage(const QImage &input)
+{
+    if (input.isNull() || m_columns <= 0) return;
+    if (m_animatedSource) {
+        const int minimumFrameTime = qRound(1000.0 / m_frameRate);
+        if (m_mediaThrottle.isValid() && m_mediaThrottle.elapsed() < minimumFrameTime)
+            return;
+        m_mediaThrottle.restart();
+    }
+    QImage image = input;
+    const auto aspect = m_imageFit == 0 ? Qt::IgnoreAspectRatio : (m_imageFit == 1 ? Qt::KeepAspectRatio : Qt::KeepAspectRatioByExpanding);
+    image = image.scaled(m_columns, m_rows, aspect, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+    if (image.size() != QSize(m_columns, m_rows)) {
+        QImage canvas(m_columns, m_rows, QImage::Format_RGBA8888);
+        canvas.fill(Qt::black);
+        QPainter painter(&canvas);
+        painter.drawImage((m_columns - image.width()) / 2, (m_rows - image.height()) / 2, image);
+        image = canvas;
+    }
+    m_imageBrightness.resize(size_t(m_columns * m_rows));
+    m_imageColors.resize(size_t(m_columns * m_rows));
+    for (int y = 0; y < m_rows; ++y) {
+        for (int x = 0; x < m_columns; ++x) {
+            const QColor c = image.pixelColor(x, y);
+            m_imageBrightness[size_t(y * m_columns + x)] = (0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()) / 255.0;
+            m_imageColors[size_t(y * m_columns + x)] = c;
+        }
+    }
+    ++m_mediaFrame;
+    if (m_sourceColor && (!m_animatedSource || m_mediaFrame == 1 || m_mediaFrame % 30 == 0))
+        updateAdaptivePalette(m_animatedSource);
+    else if (m_sourceColor)
+        rebuildImageColorIndices();
+    regenerateCharacters();
+}
+
+void AsciiRenderer::updateAdaptivePalette(bool animated)
+{
+    if (m_imageColors.empty()) return;
+    const int wanted = std::min<int>(animated ? std::min(m_colorDepth, 32) : m_colorDepth, m_imageColors.size());
+    QVector<QColor> centers;
+    centers.reserve(wanted);
+    for (int i = 0; i < wanted; ++i)
+        centers.append(m_imageColors[size_t((qint64(i) * m_imageColors.size()) / wanted)]);
+
+    // A few iterations over the small character grid are enough for stable media palettes.
+    for (int iteration = 0; iteration < 5; ++iteration) {
+        QVector<qint64> red(wanted), green(wanted), blue(wanted), count(wanted);
+        for (const QColor &color : m_imageColors) {
+            int best = 0;
+            qreal bestDistance = std::numeric_limits<qreal>::max();
+            for (int i = 0; i < centers.size(); ++i) {
+                const qreal dr = (color.redF() - centers[i].redF()) * 0.55;
+                const qreal dg = (color.greenF() - centers[i].greenF()) * 0.75;
+                const qreal db = (color.blueF() - centers[i].blueF()) * 0.45;
+                const qreal distance = dr * dr + dg * dg + db * db;
+                if (distance < bestDistance) { bestDistance = distance; best = i; }
+            }
+            red[best] += color.red(); green[best] += color.green(); blue[best] += color.blue(); ++count[best];
+        }
+        for (int i = 0; i < centers.size(); ++i)
+            if (count[i]) centers[i] = QColor(int(red[i] / count[i]), int(green[i] / count[i]), int(blue[i] / count[i]));
+    }
+    m_palette = centers;
+    m_atlasDirty = true;
+    rebuildImageColorIndices();
+}
+
+int AsciiRenderer::nearestPaletteColor(const QColor &color) const
+{
+    int best = 0;
+    qreal bestDistance = std::numeric_limits<qreal>::max();
+    for (int i = 0; i < m_palette.size(); ++i) {
+        const qreal dr = (color.redF() - m_palette[i].redF()) * 0.55;
+        const qreal dg = (color.greenF() - m_palette[i].greenF()) * 0.75;
+        const qreal db = (color.blueF() - m_palette[i].blueF()) * 0.45;
+        const qreal distance = dr * dr + dg * dg + db * db;
+        if (distance < bestDistance) { bestDistance = distance; best = i; }
+    }
+    return best;
+}
+
+void AsciiRenderer::rebuildImageColorIndices()
+{
+    m_imageColorIndices.resize(m_imageColors.size());
+    for (size_t i = 0; i < m_imageColors.size(); ++i)
+        m_imageColorIndices[i] = nearestPaletteColor(m_imageColors[i]);
+}
+
+qreal AsciiRenderer::hash(int x, int y)
+{
+    const qreal value = std::sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return value - std::floor(value);
+}
+
+qreal AsciiRenderer::brightnessAt(int x, int y) const
+{
+    x = std::clamp(x, 0, m_columns - 1);
+    y = std::clamp(y, 0, m_rows - 1);
+    if (m_sourceType == 1)
+        return m_imageBrightness.size() == m_characters.size() ? m_imageBrightness[size_t(y * m_columns + x)] : 0;
+    if (m_mode == 0) {
+        const qreal seed = hash(x, y);
+        return seed > 0.06 ? 0 : 0.15 + (0.5 + 0.5 * std::sin(m_time * (1.5 + seed * 4) + seed * 30)) * 0.85;
+    }
+    if (m_mode == 1) {
+        return m_matrixBrightness.empty() ? 0 : m_matrixBrightness[size_t(y * m_columns + x)];
+    }
+    if (m_mode == 3) {
+        const qreal nx = x * 0.19, rise = (m_rows - 1 - y) / qreal(std::max(1, m_rows));
+        const qreal flame = std::sin(nx + m_time * 2.1) * 0.18 + std::sin(nx * 0.43 - m_time * 3.2) * 0.14;
+        return std::clamp(1.15 - rise * 1.3 + flame + hash(x, int(y + m_time * 8)) * 0.16, 0.0, 1.0);
+    }
+    if (m_mode == 4) {
+        const qreal band = std::sin(x * 0.075 + m_time * 0.7) * 5 + std::sin(x * 0.021 - m_time) * 4;
+        const qreal distance = std::abs(y - m_rows * 0.48 - band);
+        return std::clamp(1.0 - distance / 10.0, 0.0, 1.0) * (0.65 + 0.35 * std::sin(x * 0.09 + m_time));
+    }
+    if (m_mode == 5) {
+        const qreal nx = x * 0.08, ny = y * 0.1;
+        const qreal cloud = std::sin(nx + std::sin(ny + m_time * 0.2)) + std::sin(ny * 1.4 - m_time * 0.25) + std::sin((nx + ny) * 0.55);
+        return std::clamp(cloud / 5.0 + 0.48, 0.0, 1.0);
+    }
+    const qreal px = x * 0.12, py = y * 0.12;
+    const qreal value = std::sin(px + m_time) + std::sin(py * 1.3 - m_time * 0.7) + std::sin((px + py) * 0.7 + m_time * 0.5);
+    return std::clamp(value / 6 + 0.5, 0.0, 1.0);
+}
+
+void AsciiRenderer::regenerateCharacters()
+{
+    if (m_characters.empty()) return;
+    for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
+        const int i = y * m_columns + x;
+        const qreal left = x ? m_heights[size_t(i - 1)] : 0;
+        const qreal right = x + 1 < m_columns ? m_heights[size_t(i + 1)] : 0;
+        const qreal up = y ? m_heights[size_t(i - m_columns)] : 0;
+        const qreal down = y + 1 < m_rows ? m_heights[size_t(i + m_columns)] : 0;
+        const int sx = qRound(x - (right - left) * 0.5);
+        const int sy = qRound(y - (down - up) * 0.5);
+        const qreal brightness = brightnessAt(sx, sy);
+        if (m_sourceType == 0 && m_mode == 1 && brightness > 0) {
+            const int sample = std::clamp(sy, 0, m_rows - 1) * m_columns + std::clamp(sx, 0, m_columns - 1);
+            m_characters[size_t(i)] = m_matrixCharacters[size_t(sample)];
+        } else {
+            m_characters[size_t(i)] = std::clamp(int(brightness * m_ramp.size()), 0, int(m_ramp.size()) - 1);
+        }
+        int paletteIndex = 0;
+        if (m_sourceColor && m_sourceType == 1) {
+            if (m_sourceType == 1 && m_imageColorIndices.size() == m_characters.size()) {
+                paletteIndex = m_imageColorIndices[size_t(std::clamp(sy, 0, m_rows - 1) * m_columns + std::clamp(sx, 0, m_columns - 1))];
+            }
+        } else if (m_sourceType == 0 && m_mode == 1 && !m_customAnimationColor) {
+            paletteIndex = brightness > 0.82 ? 11 : brightness > 0.5 ? 10 : brightness > 0.24 ? 9 : 8;
+        } else if (m_sourceType == 0 && !m_customAnimationColor) {
+            const int modeColors[] = {5, 4, 6, 2, 4, 6};
+            paletteIndex = std::min(modeColors[std::clamp(m_mode, 0, 5)], int(m_palette.size()) - 1);
+        }
+        m_colorIndices[size_t(i)] = paletteIndex;
+    }
+    update();
+}
+
+void AsciiRenderer::updateMatrix(qreal deltaTime)
+{
+    if (m_matrixBrightness.size() != size_t(m_columns * m_rows) || deltaTime <= 0)
+        return;
+    const int glyphCount = std::max(1, int(m_ramp.size()) - 1);
+    const qreal decay = std::pow(0.42, deltaTime);
+    const int tick = int(m_time * 10);
+    for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
+        const size_t i = size_t(y * m_columns + x);
+        if (m_matrixBrightness[i] <= 0) continue;
+        m_matrixBrightness[i] *= decay;
+        if (m_matrixBrightness[i] < 0.025) { m_matrixBrightness[i] = 0; continue; }
+        if (hash(x * 19 + tick, y * 23) < deltaTime * (0.35 + hash(x, y) * 1.4))
+            m_matrixCharacters[i] = 1 + int(hash(x + tick * 7, y + tick * 13) * glyphCount) % glyphCount;
+    }
+    for (int x = 0; x < m_columns; ++x) {
+        const qreal seed = hash(x, 7);
+        const int gap = 5 + int(seed * 14);
+        const int period = m_rows + gap;
+        const qreal rawHead = m_time * (4 + seed * 9) + seed * period;
+        const int head = int(std::fmod(rawHead, period));
+        if (head < 0 || head >= m_rows) continue;
+        const size_t i = size_t(head * m_columns + x);
+        m_matrixBrightness[i] = 1.0;
+        const int generation = int(std::floor(rawHead / period));
+        m_matrixCharacters[i] = 1 + int(hash(x + generation * 31, head + tick * 3) * glyphCount) % glyphCount;
+    }
+}
+
+void AsciiRenderer::addImpulse(qreal px, qreal py, qreal strength)
+{
+    const qreal cx = px / m_charWidth, cy = py / m_charHeight;
+    for (int y = std::max(1, int(cy - m_effectRadius)); y < std::min(m_rows - 1, int(std::ceil(cy + m_effectRadius))); ++y)
+        for (int x = std::max(1, int(cx - m_effectRadius)); x < std::min(m_columns - 1, int(std::ceil(cx + m_effectRadius))); ++x) {
+            const qreal distance = std::hypot(x - cx, y - cy);
+            if (distance < m_effectRadius) m_velocities[size_t(y * m_columns + x)] += strength * (1 - distance / m_effectRadius);
+        }
+    m_simulationActive = true;
+    if (!m_simulationTimer.isActive()) m_simulationTimer.start();
+}
+
+void AsciiRenderer::movePointer(qreal x, qreal y)
+{
+    if (m_pointerMovement && m_lastX >= 0) {
+        const qreal speed = std::min(3.0, std::hypot(x - m_lastX, y - m_lastY) / m_charWidth);
+        if (speed > 0.15) addImpulse(x, y, m_effectStrength * speed * 0.12);
+    }
+    m_lastX = x; m_lastY = y;
+}
+
+void AsciiRenderer::clickPointer(qreal x, qreal y) { if (m_clickRipple) addImpulse(x, y, m_effectStrength); }
+void AsciiRenderer::resetPointer() { m_lastX = m_lastY = -1; }
+
+void AsciiRenderer::stepSimulation()
+{
+    if (!m_simulationActive) { m_simulationTimer.stop(); return; }
+    auto nextV = m_velocities, nextH = m_heights;
+    qreal energy = 0;
+    for (int y = 1; y < m_rows - 1; ++y) for (int x = 1; x < m_columns - 1; ++x) {
+        const int i = y * m_columns + x;
+        const qreal acceleration = m_heights[size_t(i - 1)] + m_heights[size_t(i + 1)] + m_heights[size_t(i - m_columns)] + m_heights[size_t(i + m_columns)] - 4 * m_heights[size_t(i)];
+        nextV[size_t(i)] = (m_velocities[size_t(i)] + acceleration * m_tension) * m_damping;
+        nextH[size_t(i)] = m_heights[size_t(i)] + nextV[size_t(i)];
+        energy += std::abs(nextV[size_t(i)]) + std::abs(nextH[size_t(i)]) * 0.01;
+    }
+    m_velocities.swap(nextV); m_heights.swap(nextH);
+    m_simulationActive = energy > 0.02;
+    regenerateCharacters();
+}
+
+QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
+{
+    auto *rootNode = static_cast<RenderRoot *>(oldNode);
+    if (!rootNode) rootNode = new RenderRoot;
+    if (m_atlasDirty || !rootNode->texture) {
+        QImage atlas(m_charWidth * m_ramp.size(), m_charHeight * m_palette.size(), QImage::Format_ARGB32_Premultiplied);
+        atlas.fill(Qt::transparent);
+        QPainter painter(&atlas);
+        QFont font(QStringLiteral("DejaVu Sans Mono")); font.setPixelSize(std::max(6, int(m_charHeight * 0.8)));
+        painter.setFont(font);
+        for (int p = 0; p < m_palette.size(); ++p) {
+            painter.setPen(m_palette[p]);
+            for (int i = 0; i < m_ramp.size(); ++i) painter.drawText(QRect(i * m_charWidth, p * m_charHeight, m_charWidth, m_charHeight), Qt::AlignCenter, m_ramp.mid(i, 1));
+        }
+        painter.end();
+        delete rootNode->texture;
+        rootNode->texture = window()->createTextureFromImage(atlas);
+        if (!rootNode->texture) {
+            qWarning() << "ASCII renderer failed to create glyph atlas texture" << atlas.size() << window()->rendererInterface()->graphicsApi();
+            return rootNode;
+        }
+        qInfo() << "ASCII renderer created glyph atlas" << atlas.size() << "grid" << m_columns << m_rows;
+        m_atlasDirty = false;
+    }
+
+    while (QSGNode *child = rootNode->firstChild()) {
+        rootNode->removeChildNode(child);
+        delete child;
+    }
+    constexpr int maxGlyphsPerBatch = 10000;
+    BatchNode *batch = nullptr;
+    QSGGeometry::TexturedPoint2D *v = nullptr;
+    int batchGlyphs = 0;
+    for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
+        const int c = m_characters[size_t(y * m_columns + x)]; if (c <= 0) continue;
+        if (!batch || batchGlyphs == maxGlyphsPerBatch) {
+            batch = new BatchNode(rootNode->texture);
+            batch->geometry.allocate(maxGlyphsPerBatch * 6);
+            v = batch->geometry.vertexDataAsTexturedPoint2D();
+            batchGlyphs = 0;
+            rootNode->appendChildNode(batch);
+        }
+        const int n = batchGlyphs * 6;
+        const float x0 = x * m_charWidth, y0 = y * m_charHeight, x1 = x0 + m_charWidth, y1 = y0 + m_charHeight;
+        const float u0 = float(c) / m_ramp.size(), u1 = float(c + 1) / m_ramp.size();
+        const int paletteIndex = m_colorIndices[size_t(y * m_columns + x)];
+        const float v0 = float(paletteIndex) / m_palette.size(), v1 = float(paletteIndex + 1) / m_palette.size();
+        v[n].set(x0,y0,u0,v0); v[n+1].set(x1,y0,u1,v0); v[n+2].set(x0,y1,u0,v1);
+        v[n+3].set(x0,y1,u0,v1); v[n+4].set(x1,y0,u1,v0); v[n+5].set(x1,y1,u1,v1);
+        ++batchGlyphs;
+    }
+    if (batch) {
+        batch->geometry.setVertexCount(batchGlyphs * 6);
+        batch->markDirty(QSGNode::DirtyGeometry);
+    }
+    return rootNode;
+}

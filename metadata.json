@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "lilt"
+            }
+        ],
+        "Description": "Animated ASCII art for the Plasma desktop",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "ascii-reactive-wallpaper",
+        "License": "MIT",
+        "Name": "ASCII Reactive Wallpaper",
+        "Version": "1.0.0"
+    },
+    "X-KDE-ParentApp": "org.kde.plasmashell"
+}

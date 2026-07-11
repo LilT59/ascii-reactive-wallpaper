@@ -1,0 +1,2 @@
+module AsciiReactive.Native
+plugin asciireactivepointerplugin

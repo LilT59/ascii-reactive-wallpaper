@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+    <kcfgfile name=""/>
+    <group name="General">
+        <entry name="Mode" type="Int">
+            <label>Animation mode</label>
+            <default>0</default>
+        </entry>
+        <entry name="Detail" type="Int">
+            <label>Character size</label>
+            <default>1</default>
+        </entry>
+        <entry name="CharacterSize" type="Int">
+            <label>Character height in pixels</label>
+            <default>19</default>
+            <min>8</min>
+            <max>48</max>
+        </entry>
+        <entry name="ColorDepth" type="Int">
+            <label>Adaptive source palette size</label>
+            <default>32</default>
+            <min>4</min>
+            <max>64</max>
+        </entry>
+        <entry name="Speed" type="Double">
+            <label>Animation speed</label>
+            <default>1.0</default>
+            <min>0.1</min>
+            <max>3.0</max>
+        </entry>
+        <entry name="FrameRate" type="Int">
+            <label>Maximum animation frame rate</label>
+            <default>24</default>
+            <min>5</min>
+            <max>60</max>
+        </entry>
+        <entry name="Color" type="Color">
+            <label>Primary color</label>
+            <default>#7fdbff</default>
+        </entry>
+        <entry name="SourceType" type="Int">
+            <label>Source type</label>
+            <default>0</default>
+        </entry>
+        <entry name="ImagePath" type="Url">
+            <label>Image file</label>
+            <default></default>
+        </entry>
+        <entry name="ImageFit" type="Int">
+            <label>Image aspect mode</label>
+            <default>1</default>
+        </entry>
+        <entry name="SourceColor" type="Bool">
+            <label>Use source colors</label>
+            <default>false</default>
+        </entry>
+        <entry name="CustomAnimationColor" type="Bool">
+            <label>Use selected color for procedural animations</label>
+            <default>false</default>
+        </entry>
+        <entry name="CharacterRamp" type="String">
+            <label>Character ramp</label>
+            <default> .:-=+*#%@</default>
+        </entry>
+        <entry name="ReactiveEnabled" type="Bool">
+            <label>Enable pointer reactivity</label>
+            <default>true</default>
+        </entry>
+        <entry name="PointerMovement" type="Bool">
+            <label>React to pointer movement</label>
+            <default>true</default>
+        </entry>
+        <entry name="ClickRipple" type="Bool">
+            <label>React to pointer clicks</label>
+            <default>true</default>
+        </entry>
+        <entry name="EffectRadius" type="Int">
+            <label>Effect radius in cells</label>
+            <default>6</default>
+            <min>2</min>
+            <max>20</max>
+        </entry>
+        <entry name="EffectStrength" type="Double">
+            <label>Effect strength</label>
+            <default>1.5</default>
+            <min>0.1</min>
+            <max>5.0</max>
+        </entry>
+        <entry name="Tension" type="Double">
+            <label>Ripple tension</label>
+            <default>0.18</default>
+            <min>0.01</min>
+            <max>0.5</max>
+        </entry>
+        <entry name="Damping" type="Double">
+            <label>Ripple damping</label>
+            <default>0.92</default>
+            <min>0.5</min>
+            <max>0.99</max>
+        </entry>
+    </group>
+</kcfg>

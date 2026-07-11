@@ -1,0 +1,8 @@
+/build/
+/contents/ui/native/*.so
+*.o
+*.user
+.cache/
+.idea/
+.vscode/
+*~
