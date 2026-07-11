@@ -1,9 +1,9 @@
+*~
 /build/
+.cache/
 /contents/ui/native/*.so
+.idea/
 /Log.md
 *.o
 *.user
-.cache/
-.idea/
 .vscode/
-*~
