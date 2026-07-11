@@ -2,6 +2,8 @@
 
 A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art with a native Qt Quick scene-graph renderer.
 
+![Demo](demo.gif)
+
 ## Features
 
 - Starfield, Matrix rain, plasma, fire, aurora, and nebula modes
