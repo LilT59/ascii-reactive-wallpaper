@@ -6,6 +6,7 @@ WallpaperItem {
     id: root
 
     property real animationTime: 0.0
+    readonly property var rampPresets: [" .:-=+*#%@", " ░▒▓█", " .oO@", " .'`^\",:;Il!i><~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$", " ▁▂▃▄▅▆▇█", " ⠁⠃⠇⡇⣇⣧⣷⣿", " ·◦○◉●", " 01"]
 
     Timer {
         interval: Math.round(1000 / Math.max(5, root.configuration.FrameRate))
@@ -16,7 +17,7 @@ WallpaperItem {
 
     Rectangle {
         anchors.fill: parent
-        color: "#020307"
+        color: root.configuration.BackgroundColor
     }
 
     Native.AsciiRenderer {
@@ -33,12 +34,20 @@ WallpaperItem {
         imageFit: root.configuration.ImageFit
         sourceColor: root.configuration.SourceColor
         customAnimationColor: root.configuration.CustomAnimationColor
-        characterRamp: root.configuration.CharacterRamp
+        characterRamp: root.configuration.RampPreset > 0
+            ? root.rampPresets[root.configuration.RampPreset - 1].slice(0, 64)
+            : root.configuration.CharacterRamp
+        brightness: root.configuration.Brightness
+        contrast: root.configuration.Contrast
+        gamma: root.configuration.Gamma
+        characterSpacing: root.configuration.CharacterSpacing
+        reverseRamp: root.configuration.ReverseRamp
         reactiveEnabled: root.configuration.ReactiveEnabled
         pointerMovement: root.configuration.PointerMovement
         clickRipple: root.configuration.ClickRipple
         effectRadius: root.configuration.EffectRadius
         effectStrength: root.configuration.EffectStrength
+        waveSpeed: root.configuration.WaveSpeed
         tension: root.configuration.Tension
         damping: root.configuration.Damping
     }

@@ -25,11 +25,17 @@ class AsciiRenderer : public QQuickItem
     Q_PROPERTY(bool sourceColor READ sourceColor WRITE setSourceColor NOTIFY sourceColorChanged)
     Q_PROPERTY(bool customAnimationColor READ customAnimationColor WRITE setCustomAnimationColor NOTIFY customAnimationColorChanged)
     Q_PROPERTY(QString sourceError READ sourceError NOTIFY sourceErrorChanged)
+    Q_PROPERTY(qreal brightness READ brightness WRITE setBrightness NOTIFY brightnessChanged)
+    Q_PROPERTY(qreal contrast READ contrast WRITE setContrast NOTIFY contrastChanged)
+    Q_PROPERTY(qreal gamma READ gamma WRITE setGamma NOTIFY gammaChanged)
+    Q_PROPERTY(qreal characterSpacing READ characterSpacing WRITE setCharacterSpacing NOTIFY characterSpacingChanged)
+    Q_PROPERTY(bool reverseRamp READ reverseRamp WRITE setReverseRamp NOTIFY reverseRampChanged)
     Q_PROPERTY(bool reactiveEnabled MEMBER m_reactiveEnabled NOTIFY reactiveEnabledChanged)
     Q_PROPERTY(bool pointerMovement MEMBER m_pointerMovement NOTIFY pointerMovementChanged)
     Q_PROPERTY(bool clickRipple MEMBER m_clickRipple NOTIFY clickRippleChanged)
     Q_PROPERTY(int effectRadius MEMBER m_effectRadius NOTIFY effectRadiusChanged)
     Q_PROPERTY(qreal effectStrength MEMBER m_effectStrength NOTIFY effectStrengthChanged)
+    Q_PROPERTY(qreal waveSpeed READ waveSpeed WRITE setWaveSpeed NOTIFY waveSpeedChanged)
     Q_PROPERTY(qreal tension MEMBER m_tension NOTIFY tensionChanged)
     Q_PROPERTY(qreal damping MEMBER m_damping NOTIFY dampingChanged)
 
@@ -49,6 +55,12 @@ public:
     bool sourceColor() const { return m_sourceColor; }
     bool customAnimationColor() const { return m_customAnimationColor; }
     QString sourceError() const { return m_sourceError; }
+    qreal brightness() const { return m_brightness; }
+    qreal contrast() const { return m_contrast; }
+    qreal gamma() const { return m_gamma; }
+    qreal characterSpacing() const { return m_characterSpacing; }
+    bool reverseRamp() const { return m_reverseRamp; }
+    qreal waveSpeed() const { return m_waveSpeed; }
 
     void setTime(qreal value);
     void setMode(int value);
@@ -63,6 +75,12 @@ public:
     void setImageFit(int value);
     void setSourceColor(bool value);
     void setCustomAnimationColor(bool value);
+    void setBrightness(qreal value);
+    void setContrast(qreal value);
+    void setGamma(qreal value);
+    void setCharacterSpacing(qreal value);
+    void setReverseRamp(bool value);
+    void setWaveSpeed(qreal value);
 
     Q_INVOKABLE void movePointer(qreal x, qreal y);
     Q_INVOKABLE void clickPointer(qreal x, qreal y);
@@ -83,11 +101,17 @@ signals:
     void sourceColorChanged();
     void customAnimationColorChanged();
     void sourceErrorChanged();
+    void brightnessChanged();
+    void contrastChanged();
+    void gammaChanged();
+    void characterSpacingChanged();
+    void reverseRampChanged();
     void reactiveEnabledChanged();
     void pointerMovementChanged();
     void clickRippleChanged();
     void effectRadiusChanged();
     void effectStrengthChanged();
+    void waveSpeedChanged();
     void tensionChanged();
     void dampingChanged();
 
@@ -127,8 +151,14 @@ private:
     bool m_clickRipple = true;
     int m_effectRadius = 6;
     qreal m_effectStrength = 1.5;
+    qreal m_waveSpeed = 1.5;
     qreal m_tension = 0.18;
-    qreal m_damping = 0.92;
+    qreal m_damping = 0.65;
+    qreal m_brightness = 0.05;
+    qreal m_contrast = 1;
+    qreal m_gamma = 1;
+    qreal m_characterSpacing = 1;
+    bool m_reverseRamp = false;
     int m_columns = 0;
     int m_rows = 0;
     int m_charWidth = 11;

@@ -39,7 +39,7 @@ struct RenderRoot : QSGNode {
 AsciiRenderer::AsciiRenderer(QQuickItem *parent) : QQuickItem(parent)
 {
     setFlag(ItemHasContents, true);
-    m_simulationTimer.setInterval(33);
+    m_simulationTimer.setInterval(qRound(1000.0 / (30.0 * m_waveSpeed)));
     connect(&m_simulationTimer, &QTimer::timeout, this, &AsciiRenderer::stepSimulation);
     m_palette = {m_color, QColor("#ff5555"), QColor("#ffb86c"), QColor("#f1fa8c"), QColor("#50fa7b"), QColor("#8be9fd"), QColor("#bd93f9"), QColor("#ff79c6"), QColor("#0b3d1b"), QColor("#147a35"), QColor("#27c95a"), QColor("#b8ffd0")};
 }
@@ -65,15 +65,37 @@ void AsciiRenderer::setCharacterRamp(const QString &value) { const QString ramp 
 void AsciiRenderer::setImageFit(int value) { value = std::clamp(value, 0, 2); if (m_imageFit == value) return; m_imageFit = value; emit imageFitChanged(); rebuildImage(); }
 void AsciiRenderer::setSourceColor(bool value) { if (m_sourceColor == value) return; m_sourceColor = value; if (value && m_sourceType == 1) updateAdaptivePalette(m_animatedSource); emit sourceColorChanged(); regenerateCharacters(); }
 void AsciiRenderer::setCustomAnimationColor(bool value) { if (m_customAnimationColor == value) return; m_customAnimationColor = value; emit customAnimationColorChanged(); regenerateCharacters(); }
+void AsciiRenderer::setBrightness(qreal value) { value = std::clamp(value, -1.0, 1.0); if (qFuzzyCompare(m_brightness, value)) return; m_brightness = value; emit brightnessChanged(); regenerateCharacters(); }
+void AsciiRenderer::setContrast(qreal value) { value = std::clamp(value, 0.0, 2.0); if (qFuzzyCompare(m_contrast, value)) return; m_contrast = value; emit contrastChanged(); regenerateCharacters(); }
+void AsciiRenderer::setGamma(qreal value) { value = std::clamp(value, 0.1, 3.0); if (qFuzzyCompare(m_gamma, value)) return; m_gamma = value; emit gammaChanged(); regenerateCharacters(); }
+void AsciiRenderer::setReverseRamp(bool value) { if (m_reverseRamp == value) return; m_reverseRamp = value; emit reverseRampChanged(); regenerateCharacters(); }
+void AsciiRenderer::setWaveSpeed(qreal value)
+{
+    value = std::clamp(value, 0.5, 2.0);
+    if (qFuzzyCompare(m_waveSpeed, value)) return;
+    m_waveSpeed = value;
+    m_simulationTimer.setInterval(qRound(1000.0 / (30.0 * m_waveSpeed)));
+    emit waveSpeedChanged();
+}
+void AsciiRenderer::setCharacterSpacing(qreal value)
+{
+    value = std::clamp(value, 0.5, 2.0);
+    if (qFuzzyCompare(m_characterSpacing, value)) return;
+    m_characterSpacing = value;
+    m_charWidth = std::max(4, qRound(m_charHeight * 0.58 * m_characterSpacing));
+    m_atlasDirty = true;
+    emit characterSpacingChanged();
+    rebuildGrid();
+}
 void AsciiRenderer::setColorDepth(int value) { value = std::clamp(value, 4, 64); if (m_colorDepth == value) return; m_colorDepth = value; if (m_sourceColor && m_sourceType == 1) updateAdaptivePalette(m_animatedSource); emit colorDepthChanged(); regenerateCharacters(); }
-void AsciiRenderer::setFrameRate(int value) { value = std::clamp(value, 5, 60); if (m_frameRate == value) return; m_frameRate = value; m_simulationTimer.setInterval(qRound(1000.0 / std::min(value, 30))); emit frameRateChanged(); }
+void AsciiRenderer::setFrameRate(int value) { value = std::clamp(value, 5, 60); if (m_frameRate == value) return; m_frameRate = value; emit frameRateChanged(); }
 
 void AsciiRenderer::setCharacterSize(int value)
 {
     value = std::clamp(value, 8, 48);
     if (m_charHeight == value) return;
     m_charHeight = value;
-    m_charWidth = std::max(4, qRound(value * 0.58));
+    m_charWidth = std::max(4, qRound(value * 0.58 * m_characterSpacing));
     m_atlasDirty = true;
     emit characterSizeChanged();
     rebuildGrid();
@@ -268,6 +290,13 @@ qreal AsciiRenderer::brightnessAt(int x, int y) const
         const qreal cloud = std::sin(nx + std::sin(ny + m_time * 0.2)) + std::sin(ny * 1.4 - m_time * 0.25) + std::sin((nx + ny) * 0.55);
         return std::clamp(cloud / 5.0 + 0.48, 0.0, 1.0);
     }
+    if (m_mode == 6) {
+        const qreal swell = std::sin(x * 0.075 + m_time * 0.8) * 2.8
+            + std::sin(x * 0.031 - m_time * 0.45) * 2.0;
+        const qreal bands = std::sin(y * 0.42 + swell + m_time * 1.1);
+        const qreal shimmer = std::sin(x * 0.17 - y * 0.09 + m_time * 1.7) * 0.18;
+        return std::clamp((bands + 1.0) * 0.34 + shimmer, 0.0, 1.0);
+    }
     const qreal px = x * 0.12, py = y * 0.12;
     const qreal value = std::sin(px + m_time) + std::sin(py * 1.3 - m_time * 0.7) + std::sin((px + py) * 0.7 + m_time * 0.5);
     return std::clamp(value / 6 + 0.5, 0.0, 1.0);
@@ -276,20 +305,32 @@ qreal AsciiRenderer::brightnessAt(int x, int y) const
 void AsciiRenderer::regenerateCharacters()
 {
     if (m_characters.empty()) return;
+    const qreal cellArea = qreal(m_charWidth * m_charHeight);
+    const qreal displacementXScale = cellArea / (m_charWidth * m_charWidth);
+    const qreal displacementYScale = cellArea / (m_charHeight * m_charHeight);
     for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
         const int i = y * m_columns + x;
         const qreal left = x ? m_heights[size_t(i - 1)] : 0;
         const qreal right = x + 1 < m_columns ? m_heights[size_t(i + 1)] : 0;
         const qreal up = y ? m_heights[size_t(i - m_columns)] : 0;
         const qreal down = y + 1 < m_rows ? m_heights[size_t(i + m_columns)] : 0;
-        const int sx = qRound(x - (right - left) * 0.5);
-        const int sy = qRound(y - (down - up) * 0.5);
-        const qreal brightness = brightnessAt(sx, sy);
+        const int sx = qRound(x - (right - left) * displacementXScale * 0.5);
+        const int sy = qRound(y - (down - up) * displacementYScale * 0.5);
+        qreal brightness = brightnessAt(sx, sy);
+        const bool preserveProceduralBackground = m_sourceType == 0 && brightness <= 0;
+        if (!preserveProceduralBackground && (!qFuzzyIsNull(m_brightness) || !qFuzzyCompare(m_contrast, 1.0) || !qFuzzyCompare(m_gamma, 1.0))) {
+            brightness = std::clamp(brightness, 0.0, 1.0);
+            brightness = std::pow(brightness, 1.0 / m_gamma);
+            brightness = std::clamp((brightness - 0.5) * m_contrast + 0.5 + m_brightness, 0.0, 1.0);
+        }
         if (m_sourceType == 0 && m_mode == 1 && brightness > 0) {
             const int sample = std::clamp(sy, 0, m_rows - 1) * m_columns + std::clamp(sx, 0, m_columns - 1);
             m_characters[size_t(i)] = m_matrixCharacters[size_t(sample)];
         } else {
-            m_characters[size_t(i)] = std::clamp(int(brightness * m_ramp.size()), 0, int(m_ramp.size()) - 1);
+            int character = std::clamp(int(brightness * m_ramp.size()), 0, int(m_ramp.size()) - 1);
+            if (m_reverseRamp && character > 0)
+                character = int(m_ramp.size()) - character;
+            m_characters[size_t(i)] = character;
         }
         int paletteIndex = 0;
         if (m_sourceColor && m_sourceType == 1) {
@@ -299,8 +340,8 @@ void AsciiRenderer::regenerateCharacters()
         } else if (m_sourceType == 0 && m_mode == 1 && !m_customAnimationColor) {
             paletteIndex = brightness > 0.82 ? 11 : brightness > 0.5 ? 10 : brightness > 0.24 ? 9 : 8;
         } else if (m_sourceType == 0 && !m_customAnimationColor) {
-            const int modeColors[] = {5, 4, 6, 2, 4, 6};
-            paletteIndex = std::min(modeColors[std::clamp(m_mode, 0, 5)], int(m_palette.size()) - 1);
+            const int modeColors[] = {5, 4, 6, 2, 4, 6, 5};
+            paletteIndex = std::min(modeColors[std::clamp(m_mode, 0, 6)], int(m_palette.size()) - 1);
         }
         m_colorIndices[size_t(i)] = paletteIndex;
     }
@@ -339,9 +380,12 @@ void AsciiRenderer::updateMatrix(qreal deltaTime)
 void AsciiRenderer::addImpulse(qreal px, qreal py, qreal strength)
 {
     const qreal cx = px / m_charWidth, cy = py / m_charHeight;
-    for (int y = std::max(1, int(cy - m_effectRadius)); y < std::min(m_rows - 1, int(std::ceil(cy + m_effectRadius))); ++y)
-        for (int x = std::max(1, int(cx - m_effectRadius)); x < std::min(m_columns - 1, int(std::ceil(cx + m_effectRadius))); ++x) {
-            const qreal distance = std::hypot(x - cx, y - cy);
+    const qreal unit = std::sqrt(qreal(m_charWidth * m_charHeight));
+    const qreal radiusX = m_effectRadius * unit / m_charWidth;
+    const qreal radiusY = m_effectRadius * unit / m_charHeight;
+    for (int y = std::max(1, int(std::floor(cy - radiusY))); y < std::min(m_rows - 1, int(std::ceil(cy + radiusY))); ++y)
+        for (int x = std::max(1, int(std::floor(cx - radiusX))); x < std::min(m_columns - 1, int(std::ceil(cx + radiusX))); ++x) {
+            const qreal distance = std::hypot((x - cx) * m_charWidth / unit, (y - cy) * m_charHeight / unit);
             if (distance < m_effectRadius) m_velocities[size_t(y * m_columns + x)] += strength * (1 - distance / m_effectRadius);
         }
     m_simulationActive = true;
@@ -351,7 +395,8 @@ void AsciiRenderer::addImpulse(qreal px, qreal py, qreal strength)
 void AsciiRenderer::movePointer(qreal x, qreal y)
 {
     if (m_pointerMovement && m_lastX >= 0) {
-        const qreal speed = std::min(3.0, std::hypot(x - m_lastX, y - m_lastY) / m_charWidth);
+        const qreal cellScale = std::sqrt(qreal(m_charWidth * m_charHeight));
+        const qreal speed = std::min(3.0, std::hypot(x - m_lastX, y - m_lastY) / cellScale);
         if (speed > 0.15) addImpulse(x, y, m_effectStrength * speed * 0.12);
     }
     m_lastX = x; m_lastY = y;
@@ -365,15 +410,27 @@ void AsciiRenderer::stepSimulation()
     if (!m_simulationActive) { m_simulationTimer.stop(); return; }
     auto nextV = m_velocities, nextH = m_heights;
     qreal energy = 0;
+    const qreal inverseWidth = 1.0 / (m_charWidth * m_charWidth);
+    const qreal inverseHeight = 1.0 / (m_charHeight * m_charHeight);
+    const qreal normalization = 2.0 / (inverseWidth + inverseHeight);
+    const qreal horizontalWeight = inverseWidth * normalization;
+    const qreal verticalWeight = inverseHeight * normalization;
+    const qreal effectiveDamping = 0.82 + std::clamp(m_damping, 0.0, 1.0) * 0.175;
     for (int y = 1; y < m_rows - 1; ++y) for (int x = 1; x < m_columns - 1; ++x) {
         const int i = y * m_columns + x;
-        const qreal acceleration = m_heights[size_t(i - 1)] + m_heights[size_t(i + 1)] + m_heights[size_t(i - m_columns)] + m_heights[size_t(i + m_columns)] - 4 * m_heights[size_t(i)];
-        nextV[size_t(i)] = (m_velocities[size_t(i)] + acceleration * m_tension) * m_damping;
+        const qreal center = m_heights[size_t(i)];
+        const qreal acceleration = horizontalWeight * (m_heights[size_t(i - 1)] + m_heights[size_t(i + 1)] - 2 * center)
+            + verticalWeight * (m_heights[size_t(i - m_columns)] + m_heights[size_t(i + m_columns)] - 2 * center);
+        nextV[size_t(i)] = (m_velocities[size_t(i)] + acceleration * m_tension) * effectiveDamping;
         nextH[size_t(i)] = m_heights[size_t(i)] + nextV[size_t(i)];
         energy += std::abs(nextV[size_t(i)]) + std::abs(nextH[size_t(i)]) * 0.01;
     }
     m_velocities.swap(nextV); m_heights.swap(nextH);
     m_simulationActive = energy > 0.02;
+    if (!m_simulationActive) {
+        std::fill(m_velocities.begin(), m_velocities.end(), 0);
+        std::fill(m_heights.begin(), m_heights.end(), 0);
+    }
     regenerateCharacters();
 }
 

@@ -47,6 +47,10 @@ KConfigXT definition for user-configurable settings:
 - **Color** — Primary color / palette
 - **Speed** — Animation speed multiplier
 - **FrameRate** — Maximum animation rate (5-60 FPS)
+- **WaveSpeed** — Reactive wave propagation multiplier (0.5-2.0)
+- **RampPreset** — Built-in character-ramp selection (custom plus eight presets)
+- **BackgroundColor**, **Brightness**, **Contrast**, **Gamma** — Tone and background controls
+- **CharacterSpacing**, **ReverseRamp** — Glyph layout and ordering controls
 
 These are exposed as `wallpaper.configuration.*` properties in QML.
 
@@ -56,7 +60,8 @@ default; users can override them with the selected primary color. Source media c
 its adaptive palette independently. The configuration page includes a reset-to-defaults
 button, and defaults must remain synchronized with `contents/config/main.xml`.
 Animation rate is configurable from 5-60 FPS with a 24 FPS default. Displacement physics
-is capped at 30 FPS, and static images do not rebuild merely because the clock advances.
+runs independently at 15-60 Hz based on WaveSpeed, and static images do not rebuild merely
+because the clock advances.
 
 ### contents/ui/main.qml
 Root component extending `WallpaperItem`:
@@ -96,7 +101,7 @@ by the active wallpaper. Runtime rendering is implemented by `native/asciirender
 - Color: classic matrix green on black
 
 **Implemented additional modes**:
-- Plasma, fire, aurora, and nebula
+- Plasma, fire, aurora, nebula, and ocean waves
 
 **Future modes** (design space):
 - Audio-reactive — needs pipewire/pulse audio hook via D-Bus → shader uniform
@@ -302,7 +307,13 @@ threshold. Recompute only affected rows where practical.
 
 ## Remaining Work
 
-1. Profile CPU, memory, and frame pacing across character sizes, color depths, and media FPS.
-2. Verify behavior across multiple monitors, Plasma lock/unlock, hidden wallpapers, and Qt upgrades.
-3. Add screenshots, a demo, tagged releases, and distribution-specific packages.
-4. Consider audio-reactive and system-monitor sources after profiling the shipped modes.
+### Iteration Backlog
+
+1. [x] Correct ripple geometry with a stable, cell-aspect-aware wave solver so effects remain circular with non-square glyph cells.
+2. Profile CPU, memory, frame pacing, geometry rebuild time, and glyph counts across character sizes, color depths, frame rates, source types, and active/dormant displacement. Use the results to guide optimization rather than adding speculative complexity.
+3. [x] Improve configuration UX by grouping source, appearance, animation, and reactivity settings; hide irrelevant controls; show numeric slider values; and validate user-entered paths and ramps.
+4. [x] Expand visual customization with background color, ramp presets, tone controls, character spacing, color presets, and character-order reversal. Preserve the leading-space invariant and bounded atlas size.
+5. Add reactive inputs such as PipeWire audio, CPU/memory/network activity, time-of-day transitions, and desktop activity only after profiling the existing renderer.
+6. Verify lifecycle behavior across multiple monitors, hot-plugging, scale factors, lock/unlock, sleep/resume, hidden wallpapers, configuration previews, and Qt upgrades.
+7. Add repeatable automated validation for native compilation, unresolved symbols, QML, XML, metadata, shell scripts, source sampling, and simulation math.
+8. Improve distribution with screenshots, demos, tagged releases, KDE Store metadata, CI builds, and distribution-specific packages that respect the native Qt ABI.

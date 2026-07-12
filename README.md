@@ -6,11 +6,12 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 
 ## Features
 
-- Starfield, Matrix rain, plasma, fire, aurora, and nebula modes
+- Starfield, Matrix rain, plasma, fire, aurora, nebula, and ocean waves modes
 - Static images and procedural animations converted to ASCII
 - Adaptive source-color palettes with configurable color depth
-- Pointer displacement and click ripples
-- Configurable character ramp, size, speed, color, and frame rate
+- Aspect-correct pointer displacement and click ripples with configurable speed and persistence
+- Eight character-ramp presets, including block, Braille, geometric, and binary styles
+- Configurable background, brightness, contrast, gamma, spacing, speed, color, and frame rate
 - Native batched rendering designed to avoid blocking Plasma's UI
 
 ## Requirements
@@ -58,6 +59,8 @@ Build the architecture- and Qt-version-specific QML module:
 ```
 
 The generated library is intentionally excluded from Git. Rebuild it after Qt ABI upgrades.
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 Validate project files:
 

@@ -60,6 +60,44 @@
             <label>Character ramp</label>
             <default> .:-=+*#%@</default>
         </entry>
+        <entry name="RampPreset" type="Int">
+            <label>Character ramp preset</label>
+            <default>0</default>
+            <min>0</min>
+            <max>8</max>
+        </entry>
+        <entry name="BackgroundColor" type="Color">
+            <label>Background color</label>
+            <default>#020307</default>
+        </entry>
+        <entry name="Brightness" type="Double">
+            <label>Brightness adjustment</label>
+            <default>0.05</default>
+            <min>-1.0</min>
+            <max>1.0</max>
+        </entry>
+        <entry name="Contrast" type="Double">
+            <label>Contrast adjustment</label>
+            <default>1.0</default>
+            <min>0.0</min>
+            <max>2.0</max>
+        </entry>
+        <entry name="Gamma" type="Double">
+            <label>Gamma adjustment</label>
+            <default>1.0</default>
+            <min>0.1</min>
+            <max>3.0</max>
+        </entry>
+        <entry name="CharacterSpacing" type="Double">
+            <label>Horizontal character spacing</label>
+            <default>1.0</default>
+            <min>0.5</min>
+            <max>2.0</max>
+        </entry>
+        <entry name="ReverseRamp" type="Bool">
+            <label>Reverse non-blank character order</label>
+            <default>false</default>
+        </entry>
         <entry name="ReactiveEnabled" type="Bool">
             <label>Enable pointer reactivity</label>
             <default>true</default>
@@ -84,6 +122,12 @@
             <min>0.1</min>
             <max>5.0</max>
         </entry>
+        <entry name="WaveSpeed" type="Double">
+            <label>Wave propagation speed</label>
+            <default>1.5</default>
+            <min>0.5</min>
+            <max>2.0</max>
+        </entry>
         <entry name="Tension" type="Double">
             <label>Ripple tension</label>
             <default>0.18</default>
@@ -91,10 +135,10 @@
             <max>0.5</max>
         </entry>
         <entry name="Damping" type="Double">
-            <label>Ripple damping</label>
-            <default>0.92</default>
-            <min>0.5</min>
-            <max>0.99</max>
+            <label>Wave persistence</label>
+            <default>0.65</default>
+            <min>0.0</min>
+            <max>1.0</max>
         </entry>
     </group>
 </kcfg>

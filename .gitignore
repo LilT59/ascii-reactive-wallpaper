@@ -5,6 +5,7 @@
 /demo.gif
 .idea/
 /Log.md
+/reference.md
 *.o
 *.user
 .vscode/
