@@ -11,7 +11,7 @@
         "Id": "ascii-reactive-wallpaper",
         "License": "MIT",
         "Name": "ASCII Reactive Wallpaper",
-        "Version": "1.1.0"
+        "Version": "2.0.0"
     },
     "X-KDE-ParentApp": "org.kde.plasmashell"
 }

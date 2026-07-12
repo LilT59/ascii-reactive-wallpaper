@@ -4,6 +4,8 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 
 ![Demo](https://github.com/LilT59/ascii-reactive-wallpaper/releases/download/v1.0.0/demo.gif)
 
+Version 2.0 adds saved profiles, image-quality controls, live configuration previews, expanded appearance controls, battery-aware pausing, smoother transitions, and substantial renderer allocation reductions.
+
 ## Features
 
 - Starfield, Matrix rain, plasma, fire, aurora, nebula, and ocean waves modes
@@ -12,6 +14,11 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 - Aspect-correct pointer displacement and click ripples with configurable speed and persistence
 - Eight character-ramp presets, including block, Braille, geometric, and binary styles
 - Configurable background, brightness, contrast, gamma, spacing, speed, color, and frame rate
+- Saved profiles covering source, appearance, animation, and reactive settings
+- Configurable monospace fonts, foreground opacity, glow, procedural scale, and intensity
+- Ordered image dithering and edge-aware luminance enhancement
+- Live configuration previews, performance presets, battery pausing, and smooth setting crossfades
+- Immediate profile application with restoration of the last active profile
 - Native batched rendering designed to avoid blocking Plasma's UI
 
 ## Requirements
@@ -19,7 +26,7 @@ A KDE Plasma 6 wallpaper plugin that renders animated and reactive ASCII art wit
 - KDE Plasma 6
 - CMake 3.21 or newer
 - C++17 compiler
-- Qt 6 Core, Gui, QML, and Quick development files
+- Qt 6 Core, DBus, Gui, QML, and Quick development files
 
 Ubuntu/Debian:
 
@@ -68,7 +75,10 @@ Validate project files:
 qmllint -I contents/ui contents/ui/main.qml contents/ui/config.qml
 xmllint --noout contents/config/main.xml
 jq empty metadata.json
+ldd -r contents/ui/native/libasciireactivepointerplugin.so
 ```
+
+Set `ASCII_WALLPAPER_PROFILE=1` before starting Plasma to log five-second renderer timing summaries, including character generation, ripple simulation, scene-graph updates, atlas creation, glyph counts, and batch counts.
 
 ## Troubleshooting
 

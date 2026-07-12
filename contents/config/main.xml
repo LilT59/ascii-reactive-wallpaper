@@ -32,6 +32,22 @@
             <min>5</min>
             <max>60</max>
         </entry>
+        <entry name="ProceduralScale" type="Double">
+            <label>Procedural pattern scale</label>
+            <default>1.0</default>
+            <min>0.5</min>
+            <max>2.0</max>
+        </entry>
+        <entry name="ProceduralIntensity" type="Double">
+            <label>Procedural pattern intensity</label>
+            <default>1.0</default>
+            <min>0.25</min>
+            <max>2.0</max>
+        </entry>
+        <entry name="PauseOnBattery" type="Bool">
+            <label>Pause animation and reactivity while on battery power</label>
+            <default>false</default>
+        </entry>
         <entry name="Color" type="Color">
             <label>Primary color</label>
             <default>#7fdbff</default>
@@ -98,6 +114,32 @@
             <label>Reverse non-blank character order</label>
             <default>false</default>
         </entry>
+        <entry name="ImageDithering" type="Bool">
+            <label>Dither image luminance</label>
+            <default>true</default>
+        </entry>
+        <entry name="EdgeEnhancement" type="Double">
+            <label>Image edge enhancement</label>
+            <default>0.25</default>
+            <min>0.0</min>
+            <max>1.0</max>
+        </entry>
+        <entry name="FontFamily" type="String">
+            <label>ASCII font family</label>
+            <default>DejaVu Sans Mono</default>
+        </entry>
+        <entry name="ForegroundOpacity" type="Double">
+            <label>ASCII foreground opacity</label>
+            <default>1.0</default>
+            <min>0.1</min>
+            <max>1.0</max>
+        </entry>
+        <entry name="GlowStrength" type="Double">
+            <label>ASCII glow strength</label>
+            <default>0.0</default>
+            <min>0.0</min>
+            <max>1.0</max>
+        </entry>
         <entry name="ReactiveEnabled" type="Bool">
             <label>Enable pointer reactivity</label>
             <default>true</default>
@@ -139,6 +181,14 @@
             <default>0.65</default>
             <min>0.0</min>
             <max>1.0</max>
+        </entry>
+        <entry name="SavedProfiles" type="String">
+            <label>Saved configuration profiles</label>
+            <default></default>
+        </entry>
+        <entry name="ActiveProfileId" type="String">
+            <label>Last applied configuration profile</label>
+            <default></default>
         </entry>
     </group>
 </kcfg>

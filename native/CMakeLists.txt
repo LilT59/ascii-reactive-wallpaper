@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 REQUIRED COMPONENTS Core DBus Gui Qml Quick)
 
 add_library(asciireactivepointerplugin SHARED
     pointerplugin.cpp
@@ -17,6 +17,7 @@ add_library(asciireactivepointerplugin SHARED
 
 target_link_libraries(asciireactivepointerplugin PRIVATE
     Qt6::Core
+    Qt6::DBus
     Qt6::Gui
     Qt6::Qml
     Qt6::Quick

@@ -5,8 +5,10 @@
 #include <QQuickItem>
 #include <QTimer>
 #include <QUrl>
+#include <atomic>
 #include <vector>
 
+class QQuickWindow;
 
 class AsciiRenderer : public QQuickItem
 {
@@ -30,7 +32,14 @@ class AsciiRenderer : public QQuickItem
     Q_PROPERTY(qreal gamma READ gamma WRITE setGamma NOTIFY gammaChanged)
     Q_PROPERTY(qreal characterSpacing READ characterSpacing WRITE setCharacterSpacing NOTIFY characterSpacingChanged)
     Q_PROPERTY(bool reverseRamp READ reverseRamp WRITE setReverseRamp NOTIFY reverseRampChanged)
-    Q_PROPERTY(bool reactiveEnabled MEMBER m_reactiveEnabled NOTIFY reactiveEnabledChanged)
+    Q_PROPERTY(bool imageDithering READ imageDithering WRITE setImageDithering NOTIFY imageDitheringChanged)
+    Q_PROPERTY(qreal edgeEnhancement READ edgeEnhancement WRITE setEdgeEnhancement NOTIFY edgeEnhancementChanged)
+    Q_PROPERTY(QString fontFamily READ fontFamily WRITE setFontFamily NOTIFY fontFamilyChanged)
+    Q_PROPERTY(qreal foregroundOpacity READ foregroundOpacity WRITE setForegroundOpacity NOTIFY foregroundOpacityChanged)
+    Q_PROPERTY(qreal glowStrength READ glowStrength WRITE setGlowStrength NOTIFY glowStrengthChanged)
+    Q_PROPERTY(qreal proceduralScale READ proceduralScale WRITE setProceduralScale NOTIFY proceduralScaleChanged)
+    Q_PROPERTY(qreal proceduralIntensity READ proceduralIntensity WRITE setProceduralIntensity NOTIFY proceduralIntensityChanged)
+    Q_PROPERTY(bool reactiveEnabled READ reactiveEnabled WRITE setReactiveEnabled NOTIFY reactiveEnabledChanged)
     Q_PROPERTY(bool pointerMovement MEMBER m_pointerMovement NOTIFY pointerMovementChanged)
     Q_PROPERTY(bool clickRipple MEMBER m_clickRipple NOTIFY clickRippleChanged)
     Q_PROPERTY(int effectRadius MEMBER m_effectRadius NOTIFY effectRadiusChanged)
@@ -60,7 +69,15 @@ public:
     qreal gamma() const { return m_gamma; }
     qreal characterSpacing() const { return m_characterSpacing; }
     bool reverseRamp() const { return m_reverseRamp; }
+    bool imageDithering() const { return m_imageDithering; }
+    qreal edgeEnhancement() const { return m_edgeEnhancement; }
+    QString fontFamily() const { return m_fontFamily; }
+    qreal foregroundOpacity() const { return m_foregroundOpacity; }
+    qreal glowStrength() const { return m_glowStrength; }
+    qreal proceduralScale() const { return m_proceduralScale; }
+    qreal proceduralIntensity() const { return m_proceduralIntensity; }
     qreal waveSpeed() const { return m_waveSpeed; }
+    bool reactiveEnabled() const { return m_reactiveEnabled; }
 
     void setTime(qreal value);
     void setMode(int value);
@@ -80,7 +97,15 @@ public:
     void setGamma(qreal value);
     void setCharacterSpacing(qreal value);
     void setReverseRamp(bool value);
+    void setImageDithering(bool value);
+    void setEdgeEnhancement(qreal value);
+    void setFontFamily(const QString &value);
+    void setForegroundOpacity(qreal value);
+    void setGlowStrength(qreal value);
+    void setProceduralScale(qreal value);
+    void setProceduralIntensity(qreal value);
     void setWaveSpeed(qreal value);
+    void setReactiveEnabled(bool value);
 
     Q_INVOKABLE void movePointer(qreal x, qreal y);
     Q_INVOKABLE void clickPointer(qreal x, qreal y);
@@ -106,6 +131,13 @@ signals:
     void gammaChanged();
     void characterSpacingChanged();
     void reverseRampChanged();
+    void imageDitheringChanged();
+    void edgeEnhancementChanged();
+    void fontFamilyChanged();
+    void foregroundOpacityChanged();
+    void glowStrengthChanged();
+    void proceduralScaleChanged();
+    void proceduralIntensityChanged();
     void reactiveEnabledChanged();
     void pointerMovementChanged();
     void clickRippleChanged();
@@ -132,7 +164,29 @@ private:
     void regenerateCharacters();
     void updateMatrix(qreal deltaTime);
     qreal brightnessAt(int x, int y) const;
+    void handleWindowChanged(QQuickWindow *window);
+    void updateLifecycleState();
+    void updateSimulationTimer();
+    bool shouldRunSimulation() const;
+    void reportProfile();
+    static void recordDuration(std::atomic<quint64> &total, std::atomic<quint64> &maximum, quint64 elapsed);
     static qreal hash(int x, int y);
+
+    struct ProfileCounters {
+        std::atomic<quint64> characterFrames{0};
+        std::atomic<quint64> characterNs{0};
+        std::atomic<quint64> characterMaxNs{0};
+        std::atomic<quint64> simulationSteps{0};
+        std::atomic<quint64> simulationNs{0};
+        std::atomic<quint64> simulationMaxNs{0};
+        std::atomic<quint64> renderFrames{0};
+        std::atomic<quint64> renderNs{0};
+        std::atomic<quint64> renderMaxNs{0};
+        std::atomic<quint64> atlasBuilds{0};
+        std::atomic<quint64> atlasNs{0};
+        std::atomic<quint64> glyphs{0};
+        std::atomic<quint64> batches{0};
+    };
 
     qreal m_time = 0;
     int m_mode = 0;
@@ -159,6 +213,13 @@ private:
     qreal m_gamma = 1;
     qreal m_characterSpacing = 1;
     bool m_reverseRamp = false;
+    bool m_imageDithering = true;
+    qreal m_edgeEnhancement = 0.25;
+    QString m_fontFamily = QStringLiteral("DejaVu Sans Mono");
+    qreal m_foregroundOpacity = 1.0;
+    qreal m_glowStrength = 0.0;
+    qreal m_proceduralScale = 1.0;
+    qreal m_proceduralIntensity = 1.0;
     int m_columns = 0;
     int m_rows = 0;
     int m_charWidth = 11;
@@ -169,6 +230,8 @@ private:
     bool m_atlasDirty = true;
     std::vector<qreal> m_heights;
     std::vector<qreal> m_velocities;
+    std::vector<qreal> m_nextHeights;
+    std::vector<qreal> m_nextVelocities;
     std::vector<qreal> m_imageBrightness;
     std::vector<QColor> m_imageColors;
     std::vector<int> m_imageColorIndices;
@@ -182,4 +245,9 @@ private:
     int m_mediaFrame = 0;
     bool m_animatedSource = false;
     QTimer m_simulationTimer;
+    QTimer m_profileTimer;
+    ProfileCounters m_profile;
+    bool m_profilingEnabled = false;
+    bool m_renderable = false;
+    QMetaObject::Connection m_windowVisibilityConnection;
 };

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.0.0 - 2026-07-12
+
+### Added
+
+- Transactional saved profiles for complete wallpaper configurations.
+- Curated monospace font selection, foreground opacity, and a dedicated second-pass glow.
+- Ordered image dithering and adjustable edge enhancement.
+- Procedural pattern scale and intensity controls.
+- Optional animation and reactivity pausing while running on battery power.
+- Responsive inline procedural previews and low-power, balanced, and high-detail presets.
+- Per-section reset actions and 250 ms source/appearance crossfades.
+- Opt-in renderer timing diagnostics through `ASCII_WALLPAPER_PROFILE=1`.
+
+### Changed
+
+- Scene-graph batches and geometry buffers are reused between frames.
+- Ripple simulation scratch grids are allocated only when grid dimensions change.
+- Hidden, minimized, detached, and zero-sized renderers stop simulation work.
+- Image paths can be cleared directly, custom ramps show validation feedback, and settings include performance guidance.
+- Applying a saved profile now commits it immediately and restores the last active profile selection.
+
+### Fixed
+
+- Continuous slider changes no longer create temporary crossfade renderers.
+- Preview glow no longer uses expensive per-glyph Canvas blur.
+- Configuration controls respect narrow Plasma settings windows without breaking temporary component inspection.
+
 ## 1.1.0 - 2026-07-12
 
 ### Added

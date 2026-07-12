@@ -51,6 +51,11 @@ KConfigXT definition for user-configurable settings:
 - **RampPreset** — Built-in character-ramp selection (custom plus eight presets)
 - **BackgroundColor**, **Brightness**, **Contrast**, **Gamma** — Tone and background controls
 - **CharacterSpacing**, **ReverseRamp** — Glyph layout and ordering controls
+- **FontFamily**, **ForegroundOpacity**, **GlowStrength** — Font and second-pass glyph appearance
+- **ImageDithering**, **EdgeEnhancement** — Static image luminance quality controls
+- **ProceduralScale**, **ProceduralIntensity** — Procedural pattern shape and density
+- **PauseOnBattery** — UPower-backed animation/reactivity suspension
+- **SavedProfiles**, **ActiveProfileId** — Serialized complete profiles and active selection
 
 These are exposed as `wallpaper.configuration.*` properties in QML.
 
@@ -58,14 +63,18 @@ Current configuration uses an explicit numeric character height (8-48 px) and ad
 source color depth (4-64 colors). Procedural animations keep curated mode colors by
 default; users can override them with the selected primary color. Source media can use
 its adaptive palette independently. The configuration page includes a reset-to-defaults
-button, and defaults must remain synchronized with `contents/config/main.xml`.
+button, section-specific resets, immediate saved-profile application, and defaults that
+must remain synchronized with `contents/config/main.xml`. Inline previews use standard
+QML `Canvas` items; do not use nested `Component`/`Loader` native previews because Plasma's
+temporary configuration inspection can reject the entire settings component.
 Animation rate is configurable from 5-60 FPS with a 24 FPS default. Displacement physics
 runs independently at 15-60 Hz based on WaveSpeed, and static images do not rebuild merely
 because the clock advances.
 
 ### contents/ui/main.qml
 Root component extending `WallpaperItem`:
-- Creates one native `AsciiRenderer` child
+- Creates one persistent native `AsciiRenderer` child
+- Creates a temporary non-reactive renderer only during 250 ms discrete-setting crossfades
 - Runs a configurable timer that advances procedural animation time
 - Maps global pointer coordinates from `PointerTracker` into wallpaper-local coordinates
 - Displays media decoding errors without blocking the renderer
@@ -73,12 +82,14 @@ Root component extending `WallpaperItem`:
 
 ### native/asciirenderer.cpp
 The active rendering core. Procedural generation, image downsampling, displacement,
-and character mapping run in C++. Glyphs are cached in a small atlas and emitted as
-textured quads in batches below backend vertex limits. Never add one QML item per cell.
+and character mapping run in C++. Glyphs are cached in compact main/glow atlases and emitted
+as textured quads in reusable batches below backend vertex limits. Glow is a separate expanded
+geometry pass rather than blurred primary glyphs. Never add one QML item per cell.
 
 ### native/pointertracker.cpp
-An in-process singleton that polls the global cursor and observes mouse presses through
-a `plasmashell` application event filter. QML maps global coordinates to each wallpaper.
+An in-process singleton that polls the global cursor, observes mouse presses through a
+`plasmashell` application event filter, and polls UPower's `OnBattery` property through
+Qt DBus. QML maps global coordinates to each wallpaper.
 
 ### contents/shaders
 Historical ShaderEffect experiments. They are retained as references but are not loaded
@@ -129,6 +140,7 @@ The generated library is architecture- and Qt-ABI-specific and is excluded from 
 4. Changes propagate to the native `AsciiRenderer` immediately
 5. Ramp, detail, or palette changes rebuild the small glyph atlas
 6. Source frames and procedural ticks update bounded scene-graph geometry batches
+7. Saved profile application copies staged `cfg_*` values and calls Plasma's `applyWallpaper()`
 
 ## Development Commands
 
@@ -159,6 +171,9 @@ journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
 - **QPointF metatype** — `PointerTracker`'s QML singleton registration requires `qRegisterMetaType<QPointF>()` before `qmlRegisterSingletonType` in `registerTypes()`. Without it, the QML engine can't resolve `Q_PROPERTY(QPointF globalPosition ...)` in contexts where QPointF isn't pre-registered.
 - **Null window in updatePaintNode** — guard with `if (!window()) return nullptr;` before accessing `window()->createTextureFromImage()`. systemsettings preview windows may not have a fully initialized scene graph.
 - **Qt Multimedia** — removed from build (was linked but unused after video/GIF stripped). If re-added later, use `QLibrary` runtime loading to avoid pulling the multimedia backend into systemsettings.
+- **Configuration FormLayout** — use `QtQuick.Layouts` attached minimum/maximum widths. Raw or self-referential child width bindings can make Plasma's temporary settings component fail to instantiate.
+- **Configuration previews** — use inline standard `Canvas` items. Reusable native preview `Component`/`Loader` combinations caused `QQmlComponent: Component is not ready` with no useful nested error.
+- **Continuous controls** — do not include sliders in the crossfade signature; repeatedly creating full-screen transition renderers causes severe interaction lag.
 
 ## Quality Checklist
 
@@ -170,6 +185,8 @@ journalctl -f -o cat | grep -i --line-buffered "qml\|shader\|wallpaper\|ascii"
 - [x] Atlas regenerates when detail changes
 - [ ] No QML warnings in journalctl
 - [x] No performance stutter (stable ~30fps on integrated GPU)
+- [x] Scene-graph batches and simulation scratch buffers are reused
+- [x] Settings profiles save, apply immediately, and restore active selection
 - [x] Clean uninstall removes all plugin files
 
 ## Current Rendering Status
@@ -291,11 +308,14 @@ threshold. Recompute only affected rows where practical.
 - Numeric character size and adaptive color depth
 - Maximum update rate
 - Optional source colors and optional custom procedural color
+- Saved profiles, inline previews, performance presets, and section reset actions
+- Font, foreground opacity, second-pass glow, image dithering, and edge enhancement
+- Procedural scale/intensity and optional battery pausing
 - Reset-to-defaults action
 
 ## Performance Rules
 
-- Preserve one native renderer item; never create one QML item per character or row.
+- Preserve one persistent native renderer item; temporary transition renderers must be short-lived and non-reactive.
 - Downsample source images only when their input or grid dimensions change.
 - Do not sample full-resolution images on every animation frame.
 - Use a scalar displacement field before considering separate X/Y fields.
@@ -303,6 +323,8 @@ threshold. Recompute only affected rows where practical.
 - Cache adaptive palette assignments outside displacement updates.
 - Do not regenerate static media on procedural timer ticks.
 - Keep geometry batches below 60,000 vertices for graphics-backend compatibility.
+- Reuse scene-graph batches and simulation scratch buffers instead of allocating each frame.
+- Keep Canvas previews small and avoid per-glyph `shadowBlur`.
 - Rebuild the native module with `./build-native.sh` after Qt ABI upgrades.
 
 ## Remaining Work
@@ -310,7 +332,7 @@ threshold. Recompute only affected rows where practical.
 ### Iteration Backlog
 
 1. [x] Correct ripple geometry with a stable, cell-aspect-aware wave solver so effects remain circular with non-square glyph cells.
-2. Profile CPU, memory, frame pacing, geometry rebuild time, and glyph counts across character sizes, color depths, frame rates, source types, and active/dormant displacement. Use the results to guide optimization rather than adding speculative complexity.
+2. [x] Add opt-in timing for geometry rebuilds, atlas creation, glyph counts, batches, character generation, and simulation steps; continue collecting broader hardware profiles before further optimization.
 3. [x] Improve configuration UX by grouping source, appearance, animation, and reactivity settings; hide irrelevant controls; show numeric slider values; and validate user-entered paths and ramps.
 4. [x] Expand visual customization with background color, ramp presets, tone controls, character spacing, color presets, and character-order reversal. Preserve the leading-space invariant and bounded atlas size.
 5. Add reactive inputs such as PipeWire audio, CPU/memory/network activity, time-of-day transitions, and desktop activity only after profiling the existing renderer.

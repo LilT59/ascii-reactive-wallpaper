@@ -4,7 +4,9 @@
 #include <QFontMetrics>
 #include <QPainter>
 #include <QFileInfo>
+#include <QElapsedTimer>
 #include <QQuickWindow>
+#include <QWindow>
 #include <QDebug>
 #include <QSGGeometryNode>
 #include <QSGRendererInterface>
@@ -14,25 +16,77 @@
 #include <limits>
 
 namespace {
-struct BatchNode : QSGGeometryNode {
-    QSGGeometry geometry{QSGGeometry::defaultAttributes_TexturedPoint2D(), 0};
-    QSGTextureMaterial material;
+constexpr int MaxGlyphsPerBatch = 10000;
+constexpr int VerticesPerGlyph = 6;
 
-    explicit BatchNode(QSGTexture *texture)
+struct BatchNode : QSGGeometryNode {
+    QSGGeometry geometry{QSGGeometry::defaultAttributes_TexturedPoint2D(), MaxGlyphsPerBatch * VerticesPerGlyph};
+    QSGTextureMaterial material;
+    QSGTexture *texture = nullptr;
+
+    BatchNode()
     {
         geometry.setDrawingMode(QSGGeometry::DrawTriangles);
         geometry.setVertexDataPattern(QSGGeometry::DynamicPattern);
+        geometry.setVertexCount(0);
         setGeometry(&geometry);
         setMaterial(&material);
         material.setFlag(QSGMaterial::Blending);
-        material.setTexture(texture);
         material.setFiltering(QSGTexture::Linear);
+    }
+
+    void setTexture(QSGTexture *value)
+    {
+        if (texture == value) return;
+        texture = value;
+        material.setTexture(value);
+        markDirty(QSGNode::DirtyMaterial);
+    }
+
+    void setGlyphCount(int count)
+    {
+        geometry.setVertexCount(count * VerticesPerGlyph);
+        markDirty(QSGNode::DirtyGeometry);
     }
 };
 
 struct RenderRoot : QSGNode {
     QSGTexture *texture = nullptr;
-    ~RenderRoot() override { delete texture; }
+    QSGTexture *glowTexture = nullptr;
+    QVector<BatchNode *> batches;
+    QVector<BatchNode *> glowBatches;
+    ~RenderRoot() override
+    {
+        while (QSGNode *child = firstChild()) {
+            removeChildNode(child);
+            delete child;
+        }
+        delete texture;
+        delete glowTexture;
+    }
+
+    BatchNode *batchAt(int index, bool glow)
+    {
+        auto &nodes = glow ? glowBatches : batches;
+        if (index < nodes.size()) return nodes[index];
+        auto *batch = new BatchNode;
+        batch->setTexture(glow ? glowTexture : texture);
+        if (glow) prependChildNode(batch); else appendChildNode(batch);
+        nodes.append(batch);
+        return batch;
+    }
+
+    void setBatchTextures(QSGTexture *value, bool glow)
+    {
+        const auto &nodes = glow ? glowBatches : batches;
+        for (BatchNode *node : nodes) node->setTexture(value);
+    }
+
+    void hideBatchesFrom(int firstUnused, bool glow)
+    {
+        const auto &nodes = glow ? glowBatches : batches;
+        for (int index = firstUnused; index < nodes.size(); ++index) nodes[index]->setGlyphCount(0);
+    }
 };
 }
 
@@ -41,6 +95,14 @@ AsciiRenderer::AsciiRenderer(QQuickItem *parent) : QQuickItem(parent)
     setFlag(ItemHasContents, true);
     m_simulationTimer.setInterval(qRound(1000.0 / (30.0 * m_waveSpeed)));
     connect(&m_simulationTimer, &QTimer::timeout, this, &AsciiRenderer::stepSimulation);
+    connect(this, &QQuickItem::visibleChanged, this, &AsciiRenderer::updateLifecycleState);
+    connect(this, &QQuickItem::windowChanged, this, &AsciiRenderer::handleWindowChanged);
+    m_profilingEnabled = qEnvironmentVariableIntValue("ASCII_WALLPAPER_PROFILE") != 0;
+    if (m_profilingEnabled) {
+        m_profileTimer.setInterval(5000);
+        connect(&m_profileTimer, &QTimer::timeout, this, &AsciiRenderer::reportProfile);
+        m_profileTimer.start();
+    }
     m_palette = {m_color, QColor("#ff5555"), QColor("#ffb86c"), QColor("#f1fa8c"), QColor("#50fa7b"), QColor("#8be9fd"), QColor("#bd93f9"), QColor("#ff79c6"), QColor("#0b3d1b"), QColor("#147a35"), QColor("#27c95a"), QColor("#b8ffd0")};
 }
 
@@ -69,6 +131,13 @@ void AsciiRenderer::setBrightness(qreal value) { value = std::clamp(value, -1.0,
 void AsciiRenderer::setContrast(qreal value) { value = std::clamp(value, 0.0, 2.0); if (qFuzzyCompare(m_contrast, value)) return; m_contrast = value; emit contrastChanged(); regenerateCharacters(); }
 void AsciiRenderer::setGamma(qreal value) { value = std::clamp(value, 0.1, 3.0); if (qFuzzyCompare(m_gamma, value)) return; m_gamma = value; emit gammaChanged(); regenerateCharacters(); }
 void AsciiRenderer::setReverseRamp(bool value) { if (m_reverseRamp == value) return; m_reverseRamp = value; emit reverseRampChanged(); regenerateCharacters(); }
+void AsciiRenderer::setImageDithering(bool value) { if (m_imageDithering == value) return; m_imageDithering = value; emit imageDitheringChanged(); rebuildImage(); }
+void AsciiRenderer::setEdgeEnhancement(qreal value) { value = std::clamp(value, 0.0, 1.0); if (qFuzzyCompare(m_edgeEnhancement, value)) return; m_edgeEnhancement = value; emit edgeEnhancementChanged(); rebuildImage(); }
+void AsciiRenderer::setFontFamily(const QString &value) { const QString family = value.trimmed().isEmpty() ? QStringLiteral("DejaVu Sans Mono") : value; if (m_fontFamily == family) return; m_fontFamily = family; m_atlasDirty = true; emit fontFamilyChanged(); update(); }
+void AsciiRenderer::setForegroundOpacity(qreal value) { value = std::clamp(value, 0.1, 1.0); if (qFuzzyCompare(m_foregroundOpacity, value)) return; m_foregroundOpacity = value; m_atlasDirty = true; emit foregroundOpacityChanged(); update(); }
+void AsciiRenderer::setGlowStrength(qreal value) { value = std::clamp(value, 0.0, 1.0); if (qFuzzyCompare(m_glowStrength, value)) return; m_glowStrength = value; m_atlasDirty = true; emit glowStrengthChanged(); update(); }
+void AsciiRenderer::setProceduralScale(qreal value) { value = std::clamp(value, 0.5, 2.0); if (qFuzzyCompare(m_proceduralScale, value)) return; m_proceduralScale = value; emit proceduralScaleChanged(); regenerateCharacters(); }
+void AsciiRenderer::setProceduralIntensity(qreal value) { value = std::clamp(value, 0.25, 2.0); if (qFuzzyCompare(m_proceduralIntensity, value)) return; m_proceduralIntensity = value; emit proceduralIntensityChanged(); regenerateCharacters(); }
 void AsciiRenderer::setWaveSpeed(qreal value)
 {
     value = std::clamp(value, 0.5, 2.0);
@@ -76,6 +145,22 @@ void AsciiRenderer::setWaveSpeed(qreal value)
     m_waveSpeed = value;
     m_simulationTimer.setInterval(qRound(1000.0 / (30.0 * m_waveSpeed)));
     emit waveSpeedChanged();
+}
+void AsciiRenderer::setReactiveEnabled(bool value)
+{
+    if (m_reactiveEnabled == value) return;
+    m_reactiveEnabled = value;
+    if (!value) {
+        m_simulationActive = false;
+        resetPointer();
+        std::fill(m_heights.begin(), m_heights.end(), 0);
+        std::fill(m_velocities.begin(), m_velocities.end(), 0);
+        std::fill(m_nextHeights.begin(), m_nextHeights.end(), 0);
+        std::fill(m_nextVelocities.begin(), m_nextVelocities.end(), 0);
+        regenerateCharacters();
+    }
+    updateSimulationTimer();
+    emit reactiveEnabledChanged();
 }
 void AsciiRenderer::setCharacterSpacing(qreal value)
 {
@@ -119,6 +204,20 @@ void AsciiRenderer::setDetail(int value)
 void AsciiRenderer::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
+    resetPointer();
+    updateLifecycleState();
+    if (newGeometry.size() == oldGeometry.size()) return;
+    if (newGeometry.width() <= 0 || newGeometry.height() <= 0) {
+        m_columns = m_rows = 0;
+        m_heights.clear(); m_velocities.clear();
+        m_nextHeights.clear(); m_nextVelocities.clear();
+        m_characters.clear(); m_colorIndices.clear();
+        m_matrixBrightness.clear(); m_matrixCharacters.clear();
+        m_simulationActive = false;
+        updateSimulationTimer();
+        update();
+        return;
+    }
     rebuildGrid();
 }
 
@@ -129,12 +228,14 @@ void AsciiRenderer::rebuildGrid()
     const size_t size = size_t(m_columns * m_rows);
     m_heights.assign(size, 0);
     m_velocities.assign(size, 0);
+    m_nextHeights.assign(size, 0);
+    m_nextVelocities.assign(size, 0);
     m_characters.assign(size, 0);
     m_colorIndices.assign(size, 0);
     m_matrixBrightness.assign(size, 0);
     m_matrixCharacters.assign(size, 1);
     m_simulationActive = false;
-    m_simulationTimer.stop();
+    updateSimulationTimer();
     rebuildImage();
     regenerateCharacters();
 }
@@ -193,6 +294,25 @@ void AsciiRenderer::processImage(const QImage &input)
             const QColor c = image.pixelColor(x, y);
             m_imageBrightness[size_t(y * m_columns + x)] = (0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()) / 255.0;
             m_imageColors[size_t(y * m_columns + x)] = c;
+        }
+    }
+    const std::vector<qreal> baseBrightness = m_imageBrightness;
+    static constexpr int bayer[4][4] = {
+        {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}
+    };
+    const qreal rampStep = 1.0 / std::max(2, int(m_ramp.size()));
+    for (int y = 0; y < m_rows; ++y) {
+        for (int x = 0; x < m_columns; ++x) {
+            const size_t index = size_t(y * m_columns + x);
+            qreal luminance = baseBrightness[index];
+            if (m_edgeEnhancement > 0 && x > 0 && x + 1 < m_columns && y > 0 && y + 1 < m_rows) {
+                const qreal neighbors = baseBrightness[index - 1] + baseBrightness[index + 1]
+                    + baseBrightness[index - size_t(m_columns)] + baseBrightness[index + size_t(m_columns)];
+                luminance += (luminance * 4 - neighbors) * m_edgeEnhancement * 0.35;
+            }
+            if (m_imageDithering)
+                luminance += ((bayer[y & 3][x & 3] + 0.5) / 16.0 - 0.5) * rampStep;
+            m_imageBrightness[index] = std::clamp(luminance, 0.0, 1.0);
         }
     }
     ++m_mediaFrame;
@@ -275,29 +395,31 @@ qreal AsciiRenderer::brightnessAt(int x, int y) const
     if (m_mode == 1) {
         return m_matrixBrightness.empty() ? 0 : m_matrixBrightness[size_t(y * m_columns + x)];
     }
+    const qreal scaledX = x * m_proceduralScale;
+    const qreal scaledY = y * m_proceduralScale;
     if (m_mode == 3) {
-        const qreal nx = x * 0.19, rise = (m_rows - 1 - y) / qreal(std::max(1, m_rows));
+        const qreal nx = scaledX * 0.19, rise = (m_rows - 1 - scaledY) / qreal(std::max(1, m_rows));
         const qreal flame = std::sin(nx + m_time * 2.1) * 0.18 + std::sin(nx * 0.43 - m_time * 3.2) * 0.14;
         return std::clamp(1.15 - rise * 1.3 + flame + hash(x, int(y + m_time * 8)) * 0.16, 0.0, 1.0);
     }
     if (m_mode == 4) {
-        const qreal band = std::sin(x * 0.075 + m_time * 0.7) * 5 + std::sin(x * 0.021 - m_time) * 4;
-        const qreal distance = std::abs(y - m_rows * 0.48 - band);
-        return std::clamp(1.0 - distance / 10.0, 0.0, 1.0) * (0.65 + 0.35 * std::sin(x * 0.09 + m_time));
+        const qreal band = std::sin(scaledX * 0.075 + m_time * 0.7) * 5 + std::sin(scaledX * 0.021 - m_time) * 4;
+        const qreal distance = std::abs(scaledY - m_rows * 0.48 - band);
+        return std::clamp(1.0 - distance / 10.0, 0.0, 1.0) * (0.65 + 0.35 * std::sin(scaledX * 0.09 + m_time));
     }
     if (m_mode == 5) {
-        const qreal nx = x * 0.08, ny = y * 0.1;
+        const qreal nx = scaledX * 0.08, ny = scaledY * 0.1;
         const qreal cloud = std::sin(nx + std::sin(ny + m_time * 0.2)) + std::sin(ny * 1.4 - m_time * 0.25) + std::sin((nx + ny) * 0.55);
         return std::clamp(cloud / 5.0 + 0.48, 0.0, 1.0);
     }
     if (m_mode == 6) {
-        const qreal swell = std::sin(x * 0.075 + m_time * 0.8) * 2.8
-            + std::sin(x * 0.031 - m_time * 0.45) * 2.0;
-        const qreal bands = std::sin(y * 0.42 + swell + m_time * 1.1);
-        const qreal shimmer = std::sin(x * 0.17 - y * 0.09 + m_time * 1.7) * 0.18;
+        const qreal swell = std::sin(scaledX * 0.075 + m_time * 0.8) * 2.8
+            + std::sin(scaledX * 0.031 - m_time * 0.45) * 2.0;
+        const qreal bands = std::sin(scaledY * 0.42 + swell + m_time * 1.1);
+        const qreal shimmer = std::sin(scaledX * 0.17 - scaledY * 0.09 + m_time * 1.7) * 0.18;
         return std::clamp((bands + 1.0) * 0.34 + shimmer, 0.0, 1.0);
     }
-    const qreal px = x * 0.12, py = y * 0.12;
+    const qreal px = scaledX * 0.12, py = scaledY * 0.12;
     const qreal value = std::sin(px + m_time) + std::sin(py * 1.3 - m_time * 0.7) + std::sin((px + py) * 0.7 + m_time * 0.5);
     return std::clamp(value / 6 + 0.5, 0.0, 1.0);
 }
@@ -305,6 +427,8 @@ qreal AsciiRenderer::brightnessAt(int x, int y) const
 void AsciiRenderer::regenerateCharacters()
 {
     if (m_characters.empty()) return;
+    QElapsedTimer profileTimer;
+    if (m_profilingEnabled) profileTimer.start();
     const qreal cellArea = qreal(m_charWidth * m_charHeight);
     const qreal displacementXScale = cellArea / (m_charWidth * m_charWidth);
     const qreal displacementYScale = cellArea / (m_charHeight * m_charHeight);
@@ -317,6 +441,8 @@ void AsciiRenderer::regenerateCharacters()
         const int sx = qRound(x - (right - left) * displacementXScale * 0.5);
         const int sy = qRound(y - (down - up) * displacementYScale * 0.5);
         qreal brightness = brightnessAt(sx, sy);
+        if (m_sourceType == 0 && brightness > 0)
+            brightness = std::clamp(brightness * m_proceduralIntensity, 0.0, 1.0);
         const bool preserveProceduralBackground = m_sourceType == 0 && brightness <= 0;
         if (!preserveProceduralBackground && (!qFuzzyIsNull(m_brightness) || !qFuzzyCompare(m_contrast, 1.0) || !qFuzzyCompare(m_gamma, 1.0))) {
             brightness = std::clamp(brightness, 0.0, 1.0);
@@ -346,6 +472,11 @@ void AsciiRenderer::regenerateCharacters()
         m_colorIndices[size_t(i)] = paletteIndex;
     }
     update();
+    if (m_profilingEnabled) {
+        const quint64 elapsed = quint64(profileTimer.nsecsElapsed());
+        m_profile.characterFrames.fetch_add(1, std::memory_order_relaxed);
+        recordDuration(m_profile.characterNs, m_profile.characterMaxNs, elapsed);
+    }
 }
 
 void AsciiRenderer::updateMatrix(qreal deltaTime)
@@ -379,6 +510,7 @@ void AsciiRenderer::updateMatrix(qreal deltaTime)
 
 void AsciiRenderer::addImpulse(qreal px, qreal py, qreal strength)
 {
+    if (!m_reactiveEnabled || !m_renderable || m_columns <= 2 || m_rows <= 2) return;
     const qreal cx = px / m_charWidth, cy = py / m_charHeight;
     const qreal unit = std::sqrt(qreal(m_charWidth * m_charHeight));
     const qreal radiusX = m_effectRadius * unit / m_charWidth;
@@ -389,7 +521,7 @@ void AsciiRenderer::addImpulse(qreal px, qreal py, qreal strength)
             if (distance < m_effectRadius) m_velocities[size_t(y * m_columns + x)] += strength * (1 - distance / m_effectRadius);
         }
     m_simulationActive = true;
-    if (!m_simulationTimer.isActive()) m_simulationTimer.start();
+    updateSimulationTimer();
 }
 
 void AsciiRenderer::movePointer(qreal x, qreal y)
@@ -407,8 +539,18 @@ void AsciiRenderer::resetPointer() { m_lastX = m_lastY = -1; }
 
 void AsciiRenderer::stepSimulation()
 {
-    if (!m_simulationActive) { m_simulationTimer.stop(); return; }
-    auto nextV = m_velocities, nextH = m_heights;
+    if (!shouldRunSimulation()) { updateSimulationTimer(); return; }
+    const size_t expected = size_t(m_columns * m_rows);
+    if (m_heights.size() != expected || m_velocities.size() != expected
+        || m_nextHeights.size() != expected || m_nextVelocities.size() != expected) {
+        m_simulationActive = false;
+        updateSimulationTimer();
+        return;
+    }
+    QElapsedTimer profileTimer;
+    if (m_profilingEnabled) profileTimer.start();
+    auto &nextV = m_nextVelocities;
+    auto &nextH = m_nextHeights;
     qreal energy = 0;
     const qreal inverseWidth = 1.0 / (m_charWidth * m_charWidth);
     const qreal inverseHeight = 1.0 / (m_charHeight * m_charHeight);
@@ -425,17 +567,97 @@ void AsciiRenderer::stepSimulation()
         nextH[size_t(i)] = m_heights[size_t(i)] + nextV[size_t(i)];
         energy += std::abs(nextV[size_t(i)]) + std::abs(nextH[size_t(i)]) * 0.01;
     }
-    m_velocities.swap(nextV); m_heights.swap(nextH);
+    m_velocities.swap(m_nextVelocities); m_heights.swap(m_nextHeights);
     m_simulationActive = energy > 0.02;
     if (!m_simulationActive) {
         std::fill(m_velocities.begin(), m_velocities.end(), 0);
         std::fill(m_heights.begin(), m_heights.end(), 0);
+        std::fill(m_nextVelocities.begin(), m_nextVelocities.end(), 0);
+        std::fill(m_nextHeights.begin(), m_nextHeights.end(), 0);
+    }
+    updateSimulationTimer();
+    if (m_profilingEnabled) {
+        const quint64 elapsed = quint64(profileTimer.nsecsElapsed());
+        m_profile.simulationSteps.fetch_add(1, std::memory_order_relaxed);
+        recordDuration(m_profile.simulationNs, m_profile.simulationMaxNs, elapsed);
     }
     regenerateCharacters();
 }
 
+void AsciiRenderer::handleWindowChanged(QQuickWindow *newWindow)
+{
+    if (m_windowVisibilityConnection) disconnect(m_windowVisibilityConnection);
+    resetPointer();
+    if (newWindow) {
+        m_windowVisibilityConnection = connect(newWindow, &QWindow::visibilityChanged,
+            this, &AsciiRenderer::updateLifecycleState);
+    }
+    updateLifecycleState();
+}
+
+void AsciiRenderer::updateLifecycleState()
+{
+    QQuickWindow *itemWindow = window();
+    const bool renderable = isVisible() && width() > 0 && height() > 0 && itemWindow
+        && itemWindow->visibility() != QWindow::Hidden
+        && itemWindow->visibility() != QWindow::Minimized;
+    if (m_renderable == renderable) return;
+    m_renderable = renderable;
+    if (!renderable) resetPointer();
+    updateSimulationTimer();
+    if (renderable) update();
+}
+
+bool AsciiRenderer::shouldRunSimulation() const
+{
+    return m_simulationActive && m_reactiveEnabled && m_renderable && m_columns > 2 && m_rows > 2;
+}
+
+void AsciiRenderer::updateSimulationTimer()
+{
+    if (shouldRunSimulation()) {
+        if (!m_simulationTimer.isActive()) m_simulationTimer.start();
+    } else {
+        m_simulationTimer.stop();
+    }
+}
+
+void AsciiRenderer::recordDuration(std::atomic<quint64> &total, std::atomic<quint64> &maximum, quint64 elapsed)
+{
+    total.fetch_add(elapsed, std::memory_order_relaxed);
+    quint64 previous = maximum.load(std::memory_order_relaxed);
+    while (previous < elapsed && !maximum.compare_exchange_weak(previous, elapsed, std::memory_order_relaxed)) {}
+}
+
+void AsciiRenderer::reportProfile()
+{
+    const auto take = [](std::atomic<quint64> &value) { return value.exchange(0, std::memory_order_relaxed); };
+    const quint64 characterFrames = take(m_profile.characterFrames);
+    const quint64 characterNs = take(m_profile.characterNs);
+    const quint64 characterMaxNs = take(m_profile.characterMaxNs);
+    const quint64 simulationSteps = take(m_profile.simulationSteps);
+    const quint64 simulationNs = take(m_profile.simulationNs);
+    const quint64 simulationMaxNs = take(m_profile.simulationMaxNs);
+    const quint64 renderFrames = take(m_profile.renderFrames);
+    const quint64 renderNs = take(m_profile.renderNs);
+    const quint64 renderMaxNs = take(m_profile.renderMaxNs);
+    const quint64 atlasBuilds = take(m_profile.atlasBuilds);
+    const quint64 atlasNs = take(m_profile.atlasNs);
+    const quint64 glyphs = take(m_profile.glyphs);
+    const quint64 batches = take(m_profile.batches);
+    const auto averageMs = [](quint64 ns, quint64 count) { return count ? double(ns) / count / 1000000.0 : 0.0; };
+    qInfo().nospace() << "ASCII profile grid=" << m_columns << 'x' << m_rows
+        << " chars=" << characterFrames << " avg/max=" << averageMs(characterNs, characterFrames) << '/' << characterMaxNs / 1000000.0 << "ms"
+        << " sim=" << simulationSteps << " avg/max=" << averageMs(simulationNs, simulationSteps) << '/' << simulationMaxNs / 1000000.0 << "ms"
+        << " render=" << renderFrames << " avg/max=" << averageMs(renderNs, renderFrames) << '/' << renderMaxNs / 1000000.0 << "ms"
+        << " glyphs=" << (renderFrames ? glyphs / renderFrames : 0) << " batches=" << (renderFrames ? batches / renderFrames : 0)
+        << " atlases=" << atlasBuilds << " atlasAvg=" << averageMs(atlasNs, atlasBuilds) << "ms";
+}
+
 QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
+    QElapsedTimer renderTimer;
+    if (m_profilingEnabled) renderTimer.start();
     // Guard against null window (systemsettings preview, teardown, etc.)
     if (!window()) {
         delete oldNode;
@@ -443,56 +665,104 @@ QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     }
     auto *rootNode = static_cast<RenderRoot *>(oldNode);
     if (!rootNode) rootNode = new RenderRoot;
+    const size_t expected = size_t(std::max(0, m_columns) * std::max(0, m_rows));
+    if (!expected || m_characters.size() != expected || m_colorIndices.size() != expected) {
+        rootNode->hideBatchesFrom(0, false);
+        rootNode->hideBatchesFrom(0, true);
+        return rootNode;
+    }
     if (m_atlasDirty || !rootNode->texture) {
+        QElapsedTimer atlasTimer;
+        if (m_profilingEnabled) atlasTimer.start();
         QImage atlas(m_charWidth * m_ramp.size(), m_charHeight * m_palette.size(), QImage::Format_ARGB32_Premultiplied);
+        QImage glowAtlas(atlas.size(), QImage::Format_ARGB32_Premultiplied);
         atlas.fill(Qt::transparent);
+        glowAtlas.fill(Qt::transparent);
         QPainter painter(&atlas);
-        QFont font(QStringLiteral("DejaVu Sans Mono")); font.setPixelSize(std::max(6, int(m_charHeight * 0.8)));
+        QPainter glowPainter(&glowAtlas);
+        QFont font(m_fontFamily); font.setStyleHint(QFont::Monospace); font.setPixelSize(std::max(6, int(m_charHeight * 0.8)));
         painter.setFont(font);
+        glowPainter.setFont(font);
         for (int p = 0; p < m_palette.size(); ++p) {
-            painter.setPen(m_palette[p]);
-            for (int i = 0; i < m_ramp.size(); ++i) painter.drawText(QRect(i * m_charWidth, p * m_charHeight, m_charWidth, m_charHeight), Qt::AlignCenter, m_ramp.mid(i, 1));
+            QColor foreground = m_palette[p];
+            foreground.setAlphaF(foreground.alphaF() * m_foregroundOpacity);
+            for (int i = 0; i < m_ramp.size(); ++i) {
+                const QRect cell(i * m_charWidth, p * m_charHeight, m_charWidth, m_charHeight);
+                painter.setPen(foreground);
+                painter.drawText(cell, Qt::AlignCenter, m_ramp.mid(i, 1));
+                QColor glow = foreground;
+                glow.setAlphaF(std::min(1.0, m_glowStrength * m_foregroundOpacity * 0.5));
+                glowPainter.setPen(glow);
+                glowPainter.drawText(cell, Qt::AlignCenter, m_ramp.mid(i, 1));
+            }
         }
         painter.end();
-        delete rootNode->texture;
-        rootNode->texture = window()->createTextureFromImage(atlas);
-        if (!rootNode->texture) {
+        glowPainter.end();
+        QSGTexture *newTexture = window()->createTextureFromImage(atlas);
+        QSGTexture *newGlowTexture = window()->createTextureFromImage(glowAtlas);
+        if (!newTexture || !newGlowTexture) {
+            delete newTexture;
+            delete newGlowTexture;
             qWarning() << "ASCII renderer failed to create glyph atlas texture" << atlas.size() << window()->rendererInterface()->graphicsApi();
             return rootNode;
         }
+        QSGTexture *oldTexture = rootNode->texture;
+        QSGTexture *oldGlowTexture = rootNode->glowTexture;
+        rootNode->texture = newTexture;
+        rootNode->glowTexture = newGlowTexture;
+        rootNode->setBatchTextures(newTexture, false);
+        rootNode->setBatchTextures(newGlowTexture, true);
+        delete oldTexture;
+        delete oldGlowTexture;
         qInfo() << "ASCII renderer created glyph atlas" << atlas.size() << "grid" << m_columns << m_rows;
         m_atlasDirty = false;
+        if (m_profilingEnabled) {
+            m_profile.atlasBuilds.fetch_add(1, std::memory_order_relaxed);
+            m_profile.atlasNs.fetch_add(quint64(atlasTimer.nsecsElapsed()), std::memory_order_relaxed);
+        }
     }
 
-    while (QSGNode *child = rootNode->firstChild()) {
-        rootNode->removeChildNode(child);
-        delete child;
-    }
-    constexpr int maxGlyphsPerBatch = 10000;
-    BatchNode *batch = nullptr;
-    QSGGeometry::TexturedPoint2D *v = nullptr;
-    int batchGlyphs = 0;
-    for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
-        const int c = m_characters[size_t(y * m_columns + x)]; if (c <= 0) continue;
-        if (!batch || batchGlyphs == maxGlyphsPerBatch) {
-            batch = new BatchNode(rootNode->texture);
-            batch->geometry.allocate(maxGlyphsPerBatch * 6);
-            v = batch->geometry.vertexDataAsTexturedPoint2D();
-            batchGlyphs = 0;
-            rootNode->appendChildNode(batch);
+    quint64 visibleGlyphs = 0;
+    const auto emitBatches = [&](bool glow) {
+        BatchNode *batch = nullptr;
+        QSGGeometry::TexturedPoint2D *vertices = nullptr;
+        int batchGlyphs = 0;
+        int batchIndex = 0;
+        const auto finishBatch = [&]() { if (batch) batch->setGlyphCount(batchGlyphs); };
+        const float expansion = glow ? float(m_glowStrength * std::min(m_charWidth, m_charHeight) * 0.38) : 0.0f;
+        for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
+            const int c = m_characters[size_t(y * m_columns + x)]; if (c <= 0) continue;
+            if (!batch || batchGlyphs == MaxGlyphsPerBatch) {
+                finishBatch();
+                batch = rootNode->batchAt(batchIndex++, glow);
+                batch->setTexture(glow ? rootNode->glowTexture : rootNode->texture);
+                vertices = batch->geometry.vertexDataAsTexturedPoint2D();
+                batchGlyphs = 0;
+            }
+            const int n = batchGlyphs * 6;
+            const float x0 = x * m_charWidth - expansion, y0 = y * m_charHeight - expansion;
+            const float x1 = (x + 1) * m_charWidth + expansion, y1 = (y + 1) * m_charHeight + expansion;
+            const float u0 = float(c) / m_ramp.size(), u1 = float(c + 1) / m_ramp.size();
+            const int paletteIndex = m_colorIndices[size_t(y * m_columns + x)];
+            const float v0 = float(paletteIndex) / m_palette.size(), v1 = float(paletteIndex + 1) / m_palette.size();
+            vertices[n].set(x0,y0,u0,v0); vertices[n+1].set(x1,y0,u1,v0); vertices[n+2].set(x0,y1,u0,v1);
+            vertices[n+3].set(x0,y1,u0,v1); vertices[n+4].set(x1,y0,u1,v0); vertices[n+5].set(x1,y1,u1,v1);
+            ++batchGlyphs;
+            if (!glow) ++visibleGlyphs;
         }
-        const int n = batchGlyphs * 6;
-        const float x0 = x * m_charWidth, y0 = y * m_charHeight, x1 = x0 + m_charWidth, y1 = y0 + m_charHeight;
-        const float u0 = float(c) / m_ramp.size(), u1 = float(c + 1) / m_ramp.size();
-        const int paletteIndex = m_colorIndices[size_t(y * m_columns + x)];
-        const float v0 = float(paletteIndex) / m_palette.size(), v1 = float(paletteIndex + 1) / m_palette.size();
-        v[n].set(x0,y0,u0,v0); v[n+1].set(x1,y0,u1,v0); v[n+2].set(x0,y1,u0,v1);
-        v[n+3].set(x0,y1,u0,v1); v[n+4].set(x1,y0,u1,v0); v[n+5].set(x1,y1,u1,v1);
-        ++batchGlyphs;
-    }
-    if (batch) {
-        batch->geometry.setVertexCount(batchGlyphs * 6);
-        batch->markDirty(QSGNode::DirtyGeometry);
+        finishBatch();
+        rootNode->hideBatchesFrom(batchIndex, glow);
+        return batchIndex;
+    };
+    const int glowBatchCount = m_glowStrength > 0 ? emitBatches(true) : 0;
+    if (m_glowStrength <= 0) rootNode->hideBatchesFrom(0, true);
+    const int batchIndex = emitBatches(false);
+    if (m_profilingEnabled) {
+        const quint64 elapsed = quint64(renderTimer.nsecsElapsed());
+        m_profile.renderFrames.fetch_add(1, std::memory_order_relaxed);
+        m_profile.glyphs.fetch_add(visibleGlyphs, std::memory_order_relaxed);
+        m_profile.batches.fetch_add(quint64(batchIndex + glowBatchCount), std::memory_order_relaxed);
+        recordDuration(m_profile.renderNs, m_profile.renderMaxNs, elapsed);
     }
     return rootNode;
 }
