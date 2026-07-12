@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Matrix 3D mode with converging perspective lanes, four depth planes, curved parallax drift, depth-scaled glyph geometry, depth-dependent speed, and bright foreground heads.
+- Matrix 3D heads now deposit persistent stationary glyphs that independently cycle and fade by age, preserving classic Matrix rain behavior at substantially lower CPU cost than per-cell projection.
+
+### Fixed
+
+- Matrix 3D no longer upscales glyphs beyond their atlas resolution or duplicates foreground glyphs into adjacent columns; distant layers shrink while foreground symbols remain at crisp native size.
+- Matrix 3D immediately seeds complete trails after character-grid rebuilds, preventing blank output after horizontal spacing changes.
+
 ## 2.0.0 - 2026-07-12
 
 ### Added

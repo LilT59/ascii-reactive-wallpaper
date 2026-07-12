@@ -163,6 +163,7 @@ private:
     void stepSimulation();
     void regenerateCharacters();
     void updateMatrix(qreal deltaTime);
+    void updateMatrix3D(qreal deltaTime);
     qreal brightnessAt(int x, int y) const;
     void handleWindowChanged(QQuickWindow *window);
     void updateLifecycleState();
@@ -237,6 +238,7 @@ private:
     std::vector<int> m_imageColorIndices;
     std::vector<int> m_characters;
     std::vector<int> m_colorIndices;
+    std::vector<qreal> m_cellDepth;
     std::vector<qreal> m_matrixBrightness;
     std::vector<int> m_matrixCharacters;
     qreal m_lastMatrixTime = 0;

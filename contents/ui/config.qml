@@ -345,7 +345,7 @@ Kirigami.FormLayout {
     QQC2.ComboBox {
         id: modeBox
         Kirigami.FormData.label: i18n("Animation:")
-        model: [i18n("Starfield"), i18n("Matrix rain"), i18n("Plasma"), i18n("Fire"), i18n("Aurora"), i18n("Nebula"), i18n("Ocean waves")]
+        model: [i18n("Starfield"), i18n("Matrix rain"), i18n("Plasma"), i18n("Fire"), i18n("Aurora"), i18n("Nebula"), i18n("Ocean waves"), i18n("Matrix 3D")]
         visible: sourceBox.currentIndex === 0
     }
 
@@ -439,7 +439,7 @@ Kirigami.FormLayout {
 
             function proceduralColor(mode) {
                 if (customAnimationColorCheck.checked) return colorButton.color.toString();
-                return ["#8be9fd", "#27c95a", "#bd93f9", "#ffb86c", "#50fa7b", "#bd93f9", "#8be9fd"][Math.max(0, Math.min(6, mode))];
+                return ["#8be9fd", "#27c95a", "#bd93f9", "#ffb86c", "#50fa7b", "#bd93f9", "#8be9fd", "#27c95a"][Math.max(0, Math.min(7, mode))];
             }
 
             function sampleBrightness(mode, x, y, columns, rows, time, scale) {
@@ -455,6 +455,35 @@ Kirigami.FormLayout {
                     const head = Math.floor((time * (4 + seed * 9) + seed * period) % period);
                     const distance = head - y;
                     return distance >= 0 && distance < 8 ? Math.max(0, 1 - distance / 8) : 0;
+                }
+                if (mode === 7) {
+                    const center = (columns - 1) * 0.5;
+                    const screenDepth = Math.max(0, Math.min(1, (y - rows * 0.08) / (rows * 0.92)));
+                    let result = 0;
+                    for (let layer = 0; layer < 4; ++layer) {
+                        const depth = 0.16 + layer * 0.27;
+                        const perspective = 0.2 + screenDepth * (0.42 + depth * 0.46);
+                        const spacing = (7.2 - layer * 1.28) / scale;
+                        const worldX = center + (x - center) / Math.max(0.18, perspective);
+                        const lane = Math.round(worldX / spacing);
+                        const projectedX = center + (lane * spacing - center) * perspective;
+                        const columnDistance = Math.abs(x - projectedX);
+                        const columnWidth = 0.42 + perspective * 0.42;
+                        if (columnDistance > columnWidth) continue;
+                        const seed = noise(lane * 17 + layer * 101, layer * 37 + 11);
+                        if (seed > 0.72 + depth * 0.16) continue;
+                        const worldY = rows * 0.08 + (y - rows * 0.08) / Math.max(0.2, perspective);
+                        const period = rows / Math.max(0.25, perspective) + 18 + seed * 35;
+                        const head = (time * (4.2 + seed * 12.5) * (0.36 + depth * 1.12) + seed * period * 1.9 + layer * 23) % period;
+                        const distance = head - worldY;
+                        const trailLength = (10 + seed * 22) * (0.5 + depth * 0.95);
+                        if (distance < 0 || distance > trailLength) continue;
+                        let brightness = Math.pow(1 - distance / trailLength, 1.45)
+                            * (0.24 + depth * 0.76) * (1 - columnDistance / columnWidth);
+                        if (distance < 1.2 / Math.max(0.25, perspective)) brightness += 0.38 + depth * 0.24;
+                        result = Math.max(result, brightness);
+                    }
+                    return Math.max(0, Math.min(1, result));
                 }
                 if (mode === 3) {
                     const rise = (rows - 1 - sy) / Math.max(1, rows);

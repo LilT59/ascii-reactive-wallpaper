@@ -8,7 +8,7 @@ Version 2.0 adds saved profiles, image-quality controls, live configuration prev
 
 ## Features
 
-- Starfield, Matrix rain, plasma, fire, aurora, nebula, and ocean waves modes
+- Starfield, Matrix rain, Matrix 3D, plasma, fire, aurora, nebula, and ocean waves modes
 - Static images and procedural animations converted to ASCII
 - Adaptive source-color palettes with configurable color depth
 - Aspect-correct pointer displacement and click ripples with configurable speed and persistence

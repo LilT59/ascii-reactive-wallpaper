@@ -48,6 +48,7 @@ struct BatchNode : QSGGeometryNode {
         geometry.setVertexCount(count * VerticesPerGlyph);
         markDirty(QSGNode::DirtyGeometry);
     }
+
 };
 
 struct RenderRoot : QSGNode {
@@ -116,10 +117,12 @@ void AsciiRenderer::setTime(qreal value)
     // a source of procedural animation and must not rebuild static geometry.
     if (m_sourceType == 0 && m_mode == 1)
         updateMatrix(delta);
+    if (m_sourceType == 0 && m_mode == 7)
+        updateMatrix3D(delta);
     if (m_sourceType == 0)
         regenerateCharacters();
 }
-void AsciiRenderer::setMode(int value) { if (m_mode == value) return; m_mode = value; if (m_mode == 1) { std::fill(m_matrixBrightness.begin(), m_matrixBrightness.end(), 0); m_lastMatrixTime = m_time; } emit modeChanged(); regenerateCharacters(); }
+void AsciiRenderer::setMode(int value) { if (m_mode == value) return; m_mode = value; if (m_mode == 1 || m_mode == 7) { std::fill(m_matrixBrightness.begin(), m_matrixBrightness.end(), 0); std::fill(m_matrixCharacters.begin(), m_matrixCharacters.end(), 1); std::fill(m_cellDepth.begin(), m_cellDepth.end(), 0.1); m_lastMatrixTime = m_time; } emit modeChanged(); regenerateCharacters(); }
 void AsciiRenderer::setPrimaryColor(const QColor &value) { if (m_color == value) return; m_color = value; if (m_sourceType == 0 || !m_sourceColor) m_palette[0] = value; m_atlasDirty = true; emit primaryColorChanged(); update(); }
 void AsciiRenderer::setSourceType(int value) { if (m_sourceType == value) return; m_sourceType = value; emit sourceTypeChanged(); rebuildImage(); regenerateCharacters(); }
 void AsciiRenderer::setImageSource(const QUrl &value) { if (m_imageSource == value) return; m_imageSource = value; emit imageSourceChanged(); rebuildImage(); regenerateCharacters(); }
@@ -211,7 +214,7 @@ void AsciiRenderer::geometryChange(const QRectF &newGeometry, const QRectF &oldG
         m_columns = m_rows = 0;
         m_heights.clear(); m_velocities.clear();
         m_nextHeights.clear(); m_nextVelocities.clear();
-        m_characters.clear(); m_colorIndices.clear();
+        m_characters.clear(); m_colorIndices.clear(); m_cellDepth.clear();
         m_matrixBrightness.clear(); m_matrixCharacters.clear();
         m_simulationActive = false;
         updateSimulationTimer();
@@ -232,11 +235,14 @@ void AsciiRenderer::rebuildGrid()
     m_nextVelocities.assign(size, 0);
     m_characters.assign(size, 0);
     m_colorIndices.assign(size, 0);
+    m_cellDepth.assign(size, 0.1);
     m_matrixBrightness.assign(size, 0);
     m_matrixCharacters.assign(size, 1);
     m_simulationActive = false;
     updateSimulationTimer();
     rebuildImage();
+    if (m_sourceType == 0 && m_mode == 7)
+        updateMatrix3D(1.0 / std::max(5, m_frameRate));
     regenerateCharacters();
 }
 
@@ -395,6 +401,9 @@ qreal AsciiRenderer::brightnessAt(int x, int y) const
     if (m_mode == 1) {
         return m_matrixBrightness.empty() ? 0 : m_matrixBrightness[size_t(y * m_columns + x)];
     }
+    if (m_mode == 7) {
+        return m_matrixBrightness.empty() ? 0 : m_matrixBrightness[size_t(y * m_columns + x)];
+    }
     const qreal scaledX = x * m_proceduralScale;
     const qreal scaledY = y * m_proceduralScale;
     if (m_mode == 3) {
@@ -440,7 +449,11 @@ void AsciiRenderer::regenerateCharacters()
         const qreal down = y + 1 < m_rows ? m_heights[size_t(i + m_columns)] : 0;
         const int sx = qRound(x - (right - left) * displacementXScale * 0.5);
         const int sy = qRound(y - (down - up) * displacementYScale * 0.5);
+        const int sampleX = std::clamp(sx, 0, m_columns - 1);
+        const int sampleY = std::clamp(sy, 0, m_rows - 1);
+        const size_t sampleIndex = size_t(sampleY * m_columns + sampleX);
         qreal brightness = brightnessAt(sx, sy);
+        const qreal depth = m_mode == 7 && m_cellDepth.size() == m_characters.size() ? m_cellDepth[sampleIndex] : 1;
         if (m_sourceType == 0 && brightness > 0)
             brightness = std::clamp(brightness * m_proceduralIntensity, 0.0, 1.0);
         const bool preserveProceduralBackground = m_sourceType == 0 && brightness <= 0;
@@ -452,6 +465,8 @@ void AsciiRenderer::regenerateCharacters()
         if (m_sourceType == 0 && m_mode == 1 && brightness > 0) {
             const int sample = std::clamp(sy, 0, m_rows - 1) * m_columns + std::clamp(sx, 0, m_columns - 1);
             m_characters[size_t(i)] = m_matrixCharacters[size_t(sample)];
+        } else if (m_sourceType == 0 && m_mode == 7 && brightness > 0) {
+            m_characters[size_t(i)] = m_matrixCharacters[sampleIndex];
         } else {
             int character = std::clamp(int(brightness * m_ramp.size()), 0, int(m_ramp.size()) - 1);
             if (m_reverseRamp && character > 0)
@@ -463,11 +478,14 @@ void AsciiRenderer::regenerateCharacters()
             if (m_sourceType == 1 && m_imageColorIndices.size() == m_characters.size()) {
                 paletteIndex = m_imageColorIndices[size_t(std::clamp(sy, 0, m_rows - 1) * m_columns + std::clamp(sx, 0, m_columns - 1))];
             }
-        } else if (m_sourceType == 0 && m_mode == 1 && !m_customAnimationColor) {
-            paletteIndex = brightness > 0.82 ? 11 : brightness > 0.5 ? 10 : brightness > 0.24 ? 9 : 8;
+        } else if (m_sourceType == 0 && (m_mode == 1 || m_mode == 7) && !m_customAnimationColor) {
+            if (m_mode == 7)
+                paletteIndex = brightness > 0.9 ? 11 : depth > 0.76 ? 10 : depth > 0.42 ? 9 : 8;
+            else
+                paletteIndex = brightness > 0.82 ? 11 : brightness > 0.5 ? 10 : brightness > 0.24 ? 9 : 8;
         } else if (m_sourceType == 0 && !m_customAnimationColor) {
-            const int modeColors[] = {5, 4, 6, 2, 4, 6, 5};
-            paletteIndex = std::min(modeColors[std::clamp(m_mode, 0, 6)], int(m_palette.size()) - 1);
+            const int modeColors[] = {5, 4, 6, 2, 4, 6, 5, 4};
+            paletteIndex = std::min(modeColors[std::clamp(m_mode, 0, 7)], int(m_palette.size()) - 1);
         }
         m_colorIndices[size_t(i)] = paletteIndex;
     }
@@ -505,6 +523,88 @@ void AsciiRenderer::updateMatrix(qreal deltaTime)
         m_matrixBrightness[i] = 1.0;
         const int generation = int(std::floor(rawHead / period));
         m_matrixCharacters[i] = 1 + int(hash(x + generation * 31, head + tick * 3) * glyphCount) % glyphCount;
+    }
+}
+
+void AsciiRenderer::updateMatrix3D(qreal deltaTime)
+{
+    const size_t expected = size_t(m_columns * m_rows);
+    if (m_matrixBrightness.size() != expected || m_matrixCharacters.size() != expected
+        || m_cellDepth.size() != expected || deltaTime <= 0)
+        return;
+
+    const int glyphCount = std::max(1, int(m_ramp.size()) - 1);
+    const int tick = int(m_time * 11.0);
+    const bool hadActiveState = std::any_of(m_matrixBrightness.cbegin(), m_matrixBrightness.cend(),
+        [](qreal brightness) { return brightness > 0.018; });
+
+    // Deposited symbols remain fixed in screen space, cycle independently, and fade by age.
+    for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
+        const size_t index = size_t(y * m_columns + x);
+        qreal &brightness = m_matrixBrightness[index];
+        if (brightness <= 0) continue;
+        const qreal depth = m_cellDepth[index];
+        brightness *= std::pow(0.22 + depth * 0.24, deltaTime);
+        if (brightness < 0.018) {
+            brightness = 0;
+            m_cellDepth[index] = 0.1;
+            continue;
+        }
+        if (hash(x * 29 + tick, y * 37 + int(depth * 100)) < deltaTime * (0.45 + depth * 2.1))
+            m_matrixCharacters[index] = 1 + int(hash(x + tick * 5, y + tick * 13) * glyphCount) % glyphCount;
+    }
+
+    const qreal centerX = (m_columns - 1) * 0.5;
+    const qreal horizon = m_rows * 0.06;
+    for (int layer = 0; layer < 4; ++layer) {
+        const qreal depth = 0.16 + layer * 0.27;
+        const qreal spacing = (7.2 - layer * 1.28) / m_proceduralScale;
+        const int firstLane = int(std::floor(-m_columns * 0.35 / spacing));
+        const int lastLane = int(std::ceil(m_columns * 1.35 / spacing));
+        for (int lane = firstLane; lane <= lastLane; ++lane) {
+            const qreal seed = hash(lane * 17 + layer * 101, layer * 37 + 11);
+            if (seed > 0.72 + depth * 0.16) continue;
+
+            const qreal gap = 9 + seed * 24 + (1.0 - depth) * 16;
+            const qreal period = m_rows + gap;
+            const qreal speed = (4.2 + seed * 12.5) * (0.36 + depth * 1.12);
+            const qreal phase = seed * period * 1.9 + layer * 23.0;
+            const qreal currentHead = std::fmod(m_time * speed + phase, period);
+            const qreal previousHead = std::fmod((m_time - deltaTime) * speed + phase, period);
+            if (currentHead < 0 || currentHead >= m_rows) continue;
+
+            int firstY = qRound(currentHead);
+            int lastY = firstY;
+            const qreal seededTrailLength = (10 + seed * 22) * (0.5 + depth * 0.95);
+            if (!hadActiveState) {
+                firstY = std::max(0, int(std::floor(currentHead - seededTrailLength)));
+                lastY = std::min(m_rows - 1, int(std::ceil(currentHead)));
+            } else if (previousHead >= 0 && previousHead < m_rows && previousHead <= currentHead) {
+                firstY = std::max(0, int(std::floor(previousHead)));
+                lastY = std::min(m_rows - 1, int(std::ceil(currentHead)));
+            }
+            for (int screenY = firstY; screenY <= lastY; ++screenY) {
+                const qreal screenDepth = std::clamp((screenY - horizon) / qreal(std::max(1, m_rows) - horizon), 0.0, 1.0);
+                const qreal perspective = 0.2 + screenDepth * (0.42 + depth * 0.46);
+                const qreal curve = std::sin(m_time * (0.09 + depth * 0.08) + screenY * 0.018 + layer * 1.9)
+                    * (1.8 - depth * 1.15);
+                const qreal laneX = lane * spacing;
+                const int screenX = qRound(centerX + (laneX - centerX) * perspective + curve * perspective);
+                if (screenX < 0 || screenX >= m_columns) continue;
+
+                const size_t index = size_t(screenY * m_columns + screenX);
+                const int generation = int(std::floor((m_time * speed + phase) / period));
+                const qreal seededBrightness = hadActiveState ? 1.0
+                    : std::clamp(1.0 - (currentHead - screenY) / seededTrailLength, 0.0, 1.0)
+                        * (0.3 + depth * 0.7);
+                if (depth >= m_cellDepth[index] || m_matrixBrightness[index] < 0.7) {
+                    m_matrixBrightness[index] = std::max(m_matrixBrightness[index], seededBrightness);
+                    m_cellDepth[index] = depth;
+                    m_matrixCharacters[index] = 1 + int(hash(lane + generation * 31, screenY + layer * 43) * glyphCount) % glyphCount;
+                }
+
+            }
+        }
     }
 }
 
@@ -731,7 +831,8 @@ QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         const auto finishBatch = [&]() { if (batch) batch->setGlyphCount(batchGlyphs); };
         const float expansion = glow ? float(m_glowStrength * std::min(m_charWidth, m_charHeight) * 0.38) : 0.0f;
         for (int y = 0; y < m_rows; ++y) for (int x = 0; x < m_columns; ++x) {
-            const int c = m_characters[size_t(y * m_columns + x)]; if (c <= 0) continue;
+            const size_t cellIndex = size_t(y * m_columns + x);
+            const int c = m_characters[cellIndex]; if (c <= 0) continue;
             if (!batch || batchGlyphs == MaxGlyphsPerBatch) {
                 finishBatch();
                 batch = rootNode->batchAt(batchIndex++, glow);
@@ -740,10 +841,18 @@ QSGNode *AsciiRenderer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
                 batchGlyphs = 0;
             }
             const int n = batchGlyphs * 6;
-            const float x0 = x * m_charWidth - expansion, y0 = y * m_charHeight - expansion;
-            const float x1 = (x + 1) * m_charWidth + expansion, y1 = (y + 1) * m_charHeight + expansion;
+            const float depthScale = m_mode == 7 && m_cellDepth.size() == m_characters.size()
+                ? float(std::min(1.0, 0.48 + m_cellDepth[cellIndex] * 0.47
+                    + (qreal(y) / std::max(1, m_rows - 1)) * 0.06))
+                : 1.0f;
+            const float halfWidth = m_charWidth * depthScale * 0.5f + expansion;
+            const float halfHeight = m_charHeight * depthScale * 0.5f + expansion;
+            const float centerX = (x + 0.5f) * m_charWidth;
+            const float centerY = (y + 0.5f) * m_charHeight;
+            const float x0 = centerX - halfWidth, y0 = centerY - halfHeight;
+            const float x1 = centerX + halfWidth, y1 = centerY + halfHeight;
             const float u0 = float(c) / m_ramp.size(), u1 = float(c + 1) / m_ramp.size();
-            const int paletteIndex = m_colorIndices[size_t(y * m_columns + x)];
+            const int paletteIndex = m_colorIndices[cellIndex];
             const float v0 = float(paletteIndex) / m_palette.size(), v1 = float(paletteIndex + 1) / m_palette.size();
             vertices[n].set(x0,y0,u0,v0); vertices[n+1].set(x1,y0,u1,v0); vertices[n+2].set(x0,y1,u0,v1);
             vertices[n+3].set(x0,y1,u0,v1); vertices[n+4].set(x1,y0,u1,v0); vertices[n+5].set(x1,y1,u1,v1);

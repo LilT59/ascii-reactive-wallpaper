@@ -112,7 +112,16 @@ by the active wallpaper. Runtime rendering is implemented by `native/asciirender
 - Color: classic matrix green on black
 
 **Implemented additional modes**:
-- Plasma, fire, aurora, nebula, and ocean waves
+- Plasma, fire, aurora, nebula, ocean waves, and Matrix 3D
+
+**Mode 7 — Matrix 3D**:
+- Four projected rain planes converge toward a high vanishing point
+- Per-cell depth scales glyph geometry from distant micro-text up to native-size foreground symbols; never upscale beyond atlas resolution
+- Depth controls lane density, speed, trail length, green palette row, focus, and head flare
+- Projected heads deposit persistent screen-space glyphs that remain stationary, cycle independently, and fade by age
+- Curved parallax drift and foreground scaling reinforce depth without per-cell plane evaluation
+- Grid rebuilds immediately seed complete trails at the current phase so spacing/size changes never leave the mode blank
+- Runtime cost is one retained-cell decay/cycling pass plus projected lane heads, not four projection evaluations per cell
 
 **Future modes** (design space):
 - Audio-reactive — needs pipewire/pulse audio hook via D-Bus → shader uniform
