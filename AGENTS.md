@@ -348,3 +348,4 @@ threshold. Recompute only affected rows where practical.
 6. Verify lifecycle behavior across multiple monitors, hot-plugging, scale factors, lock/unlock, sleep/resume, hidden wallpapers, configuration previews, and Qt upgrades.
 7. Add repeatable automated validation for native compilation, unresolved symbols, QML, XML, metadata, shell scripts, source sampling, and simulation math.
 8. Improve distribution with screenshots, demos, tagged releases, KDE Store metadata, CI builds, and distribution-specific packages that respect the native Qt ABI.
+9. Profile and optimize configuration `Canvas` previews, which can currently consume substantially more resources than the native wallpaper. Throttle preview FPS, suspend painting when a preview or section is off-screen/hidden, avoid repainting unchanged settings, and share or eliminate duplicate preview work without reintroducing the `Component`/`Loader` patterns that break Plasma's temporary configuration inspection.

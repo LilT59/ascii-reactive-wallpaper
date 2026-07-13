@@ -8,18 +8,17 @@ Version 2.0 adds saved profiles, image-quality controls, live configuration prev
 
 ## Features
 
-- Starfield, Matrix rain, Matrix 3D, plasma, fire, aurora, nebula, and ocean waves modes
-- Static images and procedural animations converted to ASCII
-- Adaptive source-color palettes with configurable color depth
-- Aspect-correct pointer displacement and click ripples with configurable speed and persistence
-- Eight character-ramp presets, including block, Braille, geometric, and binary styles
-- Configurable background, brightness, contrast, gamma, spacing, speed, color, and frame rate
-- Saved profiles covering source, appearance, animation, and reactive settings
-- Configurable monospace fonts, foreground opacity, glow, procedural scale, and intensity
-- Ordered image dithering and edge-aware luminance enhancement
-- Live configuration previews, performance presets, battery pausing, and smooth setting crossfades
-- Immediate profile application with restoration of the last active profile
-- Native batched rendering designed to avoid blocking Plasma's UI
+**Modes** — Starfield, Matrix rain, Matrix 3D, plasma, fire, aurora, nebula, and ocean waves. Static images rendered as ASCII too.
+
+**Visuals** — 8 character-ramp presets (block, Braille, geometric, binary, etc.), configurable monospace fonts, glow, foreground opacity, brightness/contrast/gamma, color depth (4–64), and background.
+
+**Reactive** — Pointer displacement and click ripples with configurable speed and persistence. Battery-aware auto-pausing.
+
+**Profiles** — Save/restore full config sets covering source, appearance, animation, and reactive settings. Instant switch with last-active restoration.
+
+**Image quality** — Ordered dithering and edge-aware luminance enhancement for static source images.
+
+**Performance** — Native batched scene-graph rendering, performance presets, live config previews, smooth crossfades on setting changes.
 
 ## Requirements
 
